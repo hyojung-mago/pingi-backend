@@ -1,0 +1,150 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Room {
+  id          String       @id
+  code        String       @unique @db.VarChar(6)
+  location    String       @db.VarChar(50)
+  scheduledAt DateTime     @map("scheduled_at")
+  startedAt   DateTime?    @map("started_at")
+  endedAt     DateTime?    @map("ended_at")
+  status      String       @default("waiting") @db.VarChar(20)
+  createdAt   DateTime     @default(now()) @map("created_at")
+
+  members     Member[]
+  checkpoints Checkpoint[]
+  report      Report?
+
+  @@map("rooms")
+}
+
+model Member {
+  id                String       @id
+  roomId            String       @map("room_id")
+  nickname          String       @db.VarChar(10)
+  breed             String?      @db.VarChar(20)
+  isHost            Boolean      @default(false) @map("is_host")
+  arrivalEta        DateTime?    @map("arrival_eta")
+  arrived           Boolean      @default(false)
+  etaPreset         String?      @db.VarChar(20) @map("eta_preset")
+  hungerLevel       Int          @default(0) @map("hunger_level")
+  currentLevel      Int          @default(0) @map("current_level")
+  baselineCompleted Boolean      @default(false) @map("baseline_completed")
+  joinedAt          DateTime     @default(now()) @map("joined_at")
+
+  room        Room          @relation(fields: [roomId], references: [id])
+  baseline    Baseline?
+  drinks      Drink[]
+  recordings  Recording[]
+  token       MemberToken?
+  homeCheckin HomeCheckin?
+
+  @@unique([roomId, nickname])
+  @@map("members")
+}
+
+model MemberToken {
+  id        String   @id
+  memberId  String   @unique @map("member_id")
+  token     String   @db.Text
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  member Member @relation(fields: [memberId], references: [id])
+
+  @@map("member_tokens")
+}
+
+model Drink {
+  id         String   @id
+  memberId   String   @map("member_id")
+  type       String   @db.VarChar(20)
+  delta      Int
+  recordedAt DateTime @default(now()) @map("recorded_at")
+
+  member Member @relation(fields: [memberId], references: [id])
+
+  @@map("drinks")
+}
+
+model Baseline {
+  id         String   @id
+  memberId   String   @unique @map("member_id")
+  audioUrl1  String   @map("audio_url_1")
+  audioUrl2  String   @map("audio_url_2")
+  audioUrl3  String   @map("audio_url_3")
+  sentence1  String   @map("sentence_1")
+  sentence2  String   @map("sentence_2")
+  sentence3  String   @map("sentence_3")
+  recordedAt DateTime @default(now()) @map("recorded_at")
+
+  member Member @relation(fields: [memberId], references: [id])
+
+  @@map("baselines")
+}
+
+model Checkpoint {
+  id          String      @id
+  roomId      String      @map("room_id")
+  index       Int
+  sentence    String
+  triggeredAt DateTime    @default(now()) @map("triggered_at")
+  triggerType String      @default("manual") @map("trigger_type") @db.VarChar(20)
+  status      String      @default("pending") @db.VarChar(20)
+
+  room       Room        @relation(fields: [roomId], references: [id])
+  recordings Recording[]
+
+  @@unique([roomId, index])
+  @@map("checkpoints")
+}
+
+model Recording {
+  id            String   @id
+  checkpointId  String   @map("checkpoint_id")
+  memberId      String   @map("member_id")
+  audioUrl      String   @map("audio_url")
+  score         Float    @default(0)
+  level         Int      @default(0)
+  previousLevel Int      @default(0) @map("previous_level")
+  changeRate    Float    @default(0) @map("change_rate")
+  recordedAt   DateTime @default(now()) @map("recorded_at")
+
+  checkpoint Checkpoint @relation(fields: [checkpointId], references: [id])
+  member     Member     @relation(fields: [memberId], references: [id])
+
+  @@unique([checkpointId, memberId])
+  @@map("recordings")
+}
+
+model Report {
+  id          String   @id
+  roomId      String   @unique @map("room_id")
+  awards      Json     @default("[]")
+  badges      Json     @default("[]")
+  timeline    Json     @default("[]")
+  stats       Json     @default("{}")
+  generatedAt DateTime @default(now()) @map("generated_at")
+
+  room Room @relation(fields: [roomId], references: [id])
+
+  @@map("reports")
+}
+
+model HomeCheckin {
+  id         String   @id
+  memberId   String   @unique @map("member_id")
+  arrivedAt  DateTime @default(now()) @map("arrived_at")
+  audioUrl   String?  @map("audio_url")
+  transcript String?  @db.Text
+
+  member Member @relation(fields: [memberId], references: [id])
+
+  @@map("home_checkins")
+}

@@ -54,8 +54,9 @@ export function initializeWebSocket(httpServer: HttpServer): Server {
     socket.join(`room:${roomCode}`);
 
     // 클라이언트에서 join_room 이벤트를 보낼 때도 처리
-    socket.on('join_room', (code: string) => {
-      if (code === roomCode) {
+    socket.on('join_room', (payload: string | { roomCode?: string }) => {
+      const code = typeof payload === 'string' ? payload : payload?.roomCode;
+      if (code && code === roomCode) {
         console.log(`[WS] Member ${user.memberId} manually joined room:${roomCode}`);
         socket.join(`room:${code}`);
       }
@@ -111,7 +112,7 @@ export function emitRoomStarted(roomCode: string, startedAt: Date): void {
 
 export function emitAllBaselineComplete(roomCode: string): void {
   broadcastToRoom(roomCode, 'all_baseline_complete', {
-    startedAt: new Date().toISOString(),
+    roomCode,
   });
 }
 
@@ -157,11 +158,13 @@ export function emitRoomEnded(roomCode: string, reportId: string): void {
 export function emitHomeCheckinResult(
   roomCode: string,
   member: { id: string; nickname: string },
-  arrivedAt: string
+  arrivedAt: string,
+  transcript: string | null
 ): void {
   broadcastToRoom(roomCode, 'home_checkin_result', {
     memberId: member.id,
     nickname: member.nickname,
     arrivedAt,
+    transcript,
   });
 }

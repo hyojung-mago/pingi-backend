@@ -2,7 +2,7 @@
  * @file middleware/upload.ts - 파일 업로드 미들웨어
  *
  * Multer를 사용하여 오디오 파일 업로드를 처리한다.
- * WAV, WebM, OGG, MP4, MP3 형식을 지원하며 최대 500KB 제한이 있다.
+ * WAV, WebM, OGG, MP4, MP3 형식을 지원한다. 최대 크기는 env MAX_FILE_SIZE (API 명세 기본 500KB).
  */
 import multer from 'multer';
 import path from 'path';

@@ -8,3 +8,4 @@ export { generateId } from './idGenerator';
 export { generateRoomCode, isValidRoomCode } from './codeGenerator';
 export { toSojuEquivalent, getDrinkRate, aggregateDrinks } from './drinkConverter';
 export { calculateLevel, calculateChangeRate, getLevelDescription } from './levelCalculator';
+export { multerFileToPublicRelativePath, resolveStoredUploadPath } from './uploadPaths';

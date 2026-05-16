@@ -7,6 +7,8 @@
 import { prisma } from '../lib/prisma';
 import { generateId } from '../utils';
 import { AppError } from '../middleware/errorHandler';
+import { config } from '../config';
+import { transcribeWithGoogleCloud, isGoogleSttConfigured } from './sttService';
 
 export interface HomeCheckinResult {
   arrivedAt: string;
@@ -26,7 +28,7 @@ export async function createHomeCheckin(
   });
 
   if (!member) {
-    throw AppError.notFound('멤버');
+    throw AppError.notFound('멤버를 찾을 수 없어요');
   }
 
   if (member.homeCheckin) {
@@ -59,7 +61,7 @@ export async function getHomeCheckin(memberId: string) {
   });
 
   if (!homeCheckin) {
-    throw AppError.notFound('귀가 체크인');
+    throw AppError.notFound('귀가 체크인을 찾을 수 없어요');
   }
 
   return {
@@ -69,7 +71,25 @@ export async function getHomeCheckin(memberId: string) {
   };
 }
 
-async function transcribeAudio(_audioUrl: string): Promise<string> {
+async function transcribeAudio(storedPath: string): Promise<string | null> {
+  if (isGoogleSttConfigured()) {
+    const text = await transcribeWithGoogleCloud(storedPath);
+    if (text) return text;
+    console.warn('[STT] Google STT 결과가 비었거나 실패했어요. 클라이언트 transcript만 있다면 그걸 쓰세요.');
+    return null;
+  }
+
+  if (config.isDev) {
+    console.warn(
+      '[STT] GOOGLE_APPLICATION_CREDENTIALS 가 없어 개발용 목(mock) 전사를 씁니다. 스웨거/문서와 달리 실제 STT는 GCP 설정 후 동작합니다.'
+    );
+    return mockTranscriptPhrase();
+  }
+
+  return null;
+}
+
+function mockTranscriptPhrase(): string {
   const mockPhrases = [
     '무사히 집에 도착했어요!',
     '오늘 정말 재밌었어요~',
@@ -77,6 +97,5 @@ async function transcribeAudio(_audioUrl: string): Promise<string> {
     '내일 또 해요!',
     '택시 타고 가는 중이에요',
   ];
-  
   return mockPhrases[Math.floor(Math.random() * mockPhrases.length)] ?? mockPhrases[0]!;
 }

@@ -53,10 +53,16 @@ router.post(
 );
 
 router.post(
+  '/:code/pingi-time',
+  validateParams(roomCodeSchema),
+  authMiddleware,
+  roomController.triggerPingiTime
+);
+
+router.post(
   '/:code/pingi',
   validateParams(roomCodeSchema),
   authMiddleware,
-  hostOnly,
   roomController.triggerPingiTime
 );
 

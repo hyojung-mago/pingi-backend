@@ -9,6 +9,28 @@ import { generateId, aggregateDrinks, toSojuEquivalent } from '../utils';
 import { AppError } from '../middleware/errorHandler';
 import type { FinalReport, Award, Badge, TimelineEntry, ShareCardData, AwardType, CharacterBreed } from '../types';
 
+function mapReportRow(
+  roomId: string,
+  row: {
+    id: string;
+    awards: unknown;
+    badges: unknown;
+    timeline: unknown;
+    stats: unknown;
+    generatedAt: Date;
+  }
+): FinalReport {
+  return {
+    id: row.id,
+    roomId,
+    awards: row.awards as Award[],
+    badges: row.badges as Badge[],
+    timeline: row.timeline as TimelineEntry[],
+    stats: row.stats as FinalReport['stats'],
+    generatedAt: row.generatedAt.toISOString(),
+  };
+}
+
 export async function generateReport(roomId: string): Promise<FinalReport> {
   const room = await prisma.room.findUnique({
     where: { id: roomId },
@@ -28,22 +50,42 @@ export async function generateReport(roomId: string): Promise<FinalReport> {
   });
 
   if (!room) {
-    throw AppError.notFound('방');
+    throw AppError.notFound('방을 찾을 수 없어요');
   }
 
-  const awards = calculateAwards(room.members, room.checkpoints);
-  const badges = calculateBadges(room.members, room.checkpoints);
-  const timeline = generateTimeline(room.checkpoints);
-  const stats = calculateStats(room.members, room.checkpoints);
+  const members = room.members.map((m) => ({
+    id: m.id,
+    nickname: m.nickname,
+    breed: m.breed,
+    currentLevel: m.currentLevel,
+    arrivalEta: m.arrivalEta,
+    joinedAt: m.joinedAt,
+    drinks: m.drinks,
+  }));
 
-  const existingReport = await prisma.report.findUnique({
-    where: { roomId },
-  });
+  const checkpoints = room.checkpoints.map((cp) => ({
+    id: cp.id,
+    index: cp.index,
+    triggeredAt: cp.triggeredAt,
+    recordings: cp.recordings.map((r) => ({
+      memberId: r.memberId,
+      level: r.level,
+      member: { nickname: r.member.nickname },
+    })),
+  }));
 
-  if (existingReport) {
-    await prisma.report.update({
+  const awards = calculateAwards(members, checkpoints);
+  const badges = calculateBadges(members, checkpoints);
+  const timeline = generateTimeline(checkpoints);
+  const stats = calculateStats(members, checkpoints);
+
+  const existing = await prisma.report.findUnique({ where: { roomId } });
+
+  let reportRow;
+  if (existing) {
+    reportRow = await prisma.report.update({
       where: { roomId },
-      data: { 
+      data: {
         awards: awards as unknown as object,
         badges: badges as unknown as object,
         timeline: timeline as unknown as object,
@@ -51,7 +93,7 @@ export async function generateReport(roomId: string): Promise<FinalReport> {
       },
     });
   } else {
-    await prisma.report.create({
+    reportRow = await prisma.report.create({
       data: {
         id: generateId('report'),
         roomId,
@@ -63,7 +105,7 @@ export async function generateReport(roomId: string): Promise<FinalReport> {
     });
   }
 
-  return { awards, badges, timeline, stats };
+  return mapReportRow(roomId, reportRow);
 }
 
 export async function getReport(roomCode: string): Promise<FinalReport> {
@@ -73,19 +115,14 @@ export async function getReport(roomCode: string): Promise<FinalReport> {
   });
 
   if (!room) {
-    throw AppError.notFound('방');
+    throw AppError.notFound('방을 찾을 수 없어요');
   }
 
   if (!room.report) {
     return generateReport(room.id);
   }
 
-  return {
-    awards: (room.report.awards as unknown) as Award[],
-    badges: (room.report.badges as unknown) as Badge[],
-    timeline: (room.report.timeline as unknown) as TimelineEntry[],
-    stats: (room.report.stats as unknown) as FinalReport['stats'],
-  };
+  return mapReportRow(room.id, room.report);
 }
 
 export async function getShareCardData(roomCode: string, _aspect: string): Promise<ShareCardData> {
@@ -98,7 +135,7 @@ export async function getShareCardData(roomCode: string, _aspect: string): Promi
   });
 
   if (!room) {
-    throw AppError.notFound('방');
+    throw AppError.notFound('방을 찾을 수 없어요');
   }
 
   const report = room.report;
@@ -112,7 +149,7 @@ export async function getShareCardData(roomCode: string, _aspect: string): Promi
     members: room.members.map((m) => ({
       nickname: m.nickname,
       breed: m.breed as CharacterBreed | null,
-      level: m.level,
+      level: m.currentLevel,
     })),
   };
 }
@@ -121,21 +158,19 @@ type MemberWithDrinks = {
   id: string;
   nickname: string;
   breed: string | null;
-  level: number;
+  currentLevel: number;
   arrivalEta: Date | null;
-  createdAt: Date;
+  joinedAt: Date;
   drinks: { type: string; delta: number }[];
 };
 
 type CheckpointWithRecordings = {
   id: string;
   index: number;
-  startedAt: Date;
+  triggeredAt: Date;
   recordings: {
     memberId: string;
     level: number | null;
-    previousLevel: number | null;
-    delta: number | null;
     member: { nickname: string };
   }[];
 };
@@ -146,7 +181,7 @@ function calculateAwards(
 ): Award[] {
   const awards: Award[] = [];
 
-  const sortedByLevel = [...members].sort((a, b) => b.level - a.level);
+  const sortedByLevel = [...members].sort((a, b) => b.currentLevel - a.currentLevel);
   const topDrunk = sortedByLevel[0];
   if (topDrunk) {
     awards.push({
@@ -154,7 +189,7 @@ function calculateAwards(
       memberId: topDrunk.id,
       nickname: topDrunk.nickname,
       breed: topDrunk.breed as CharacterBreed | null,
-      description: `최종 레벨 ${topDrunk.level}로 오늘의 주량왕!`,
+      description: `최종 레벨 ${topDrunk.currentLevel}로 오늘의 주량왕!`,
     });
   }
 
@@ -165,7 +200,7 @@ function calculateAwards(
       memberId: liverGuardian.id,
       nickname: liverGuardian.nickname,
       breed: liverGuardian.breed as CharacterBreed | null,
-      description: `최종 레벨 ${liverGuardian.level}로 간 지키미!`,
+      description: `최종 레벨 ${liverGuardian.currentLevel}로 간 지키미!`,
     });
   }
 
@@ -255,8 +290,8 @@ function calculateBadges(
   }
 
   const sortedByArrival = [...members].sort((a, b) => {
-    const aTime = a.arrivalEta?.getTime() ?? a.createdAt.getTime();
-    const bTime = b.arrivalEta?.getTime() ?? b.createdAt.getTime();
+    const aTime = a.arrivalEta?.getTime() ?? a.joinedAt.getTime();
+    const bTime = b.arrivalEta?.getTime() ?? b.joinedAt.getTime();
     return aTime - bTime;
   });
 
@@ -274,32 +309,36 @@ function calculateBadges(
 }
 
 function generateTimeline(checkpoints: CheckpointWithRecordings[]): TimelineEntry[] {
-  return checkpoints.map((checkpoint) => {
-    const memberLevels = new Map<string, number>();
-    
-    for (const recording of checkpoint.recordings) {
-      memberLevels.set(recording.memberId, recording.level ?? 0);
-    }
-
-    return {
-      time: checkpoint.startedAt.toISOString(),
-      levels: Array.from(memberLevels.values()),
-    };
-  });
+  return checkpoints.map((checkpoint) => ({
+    time: checkpoint.triggeredAt.toISOString(),
+    checkpointIndex: checkpoint.index,
+    levels: checkpoint.recordings.map((r) => ({
+      memberId: r.memberId,
+      level: r.level ?? 0,
+    })),
+  }));
 }
 
 function calculateStats(
   members: MemberWithDrinks[],
   checkpoints: CheckpointWithRecordings[]
 ): FinalReport['stats'] {
-  const sortedByLevel = [...members].sort((a, b) => b.level - a.level);
+  const sortedByLevel = [...members].sort((a, b) => b.currentLevel - a.currentLevel);
   const topMember = sortedByLevel[0];
+
+  const totalDrinks = members.reduce(
+    (sum, m) => sum + toSojuEquivalent(aggregateDrinks(m.drinks)),
+    0
+  );
 
   return {
     pingiTimeCount: checkpoints.length,
-    maxLevelMember: {
-      nickname: topMember?.nickname ?? '',
-      level: topMember?.level ?? 0,
-    },
+    maxLevelMember: topMember
+      ? {
+          nickname: topMember.nickname,
+          level: topMember.currentLevel,
+        }
+      : null,
+    totalDrinks: Math.round(totalDrinks * 10) / 10,
   };
 }

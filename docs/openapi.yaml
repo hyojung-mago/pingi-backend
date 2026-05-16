@@ -8,8 +8,13 @@ info:
     - 방 생성/입장 시 JWT 토큰 발급
     - `Authorization: Bearer <token>` 헤더로 인증
     
-    ## WebSocket
-    - 실시간 이벤트: `wss://api.pingi.app/v1/ws?room={code}&token={token}`
+    ## WebSocket (Socket.IO)
+    - 연결 경로: `/v1/ws` — 쿼리: `room`(방 코드), `token`(JWT)
+    - 예: `ws://localhost:8000` 로 연결 후 path `/v1/ws` 또는 프로덕션 `wss://api.pingi.app` + 동일 path
+    
+    ## 귀가 후기 STT (서버)
+    - `POST /members/{id}/home` 에서 `audio`만 보낼 때: 환경 변수 `GOOGLE_APPLICATION_CREDENTIALS`(GCP 서비스 계정 JSON)와 **Cloud Speech-to-Text API**가 켜져 있으면 Google STT로 전사합니다.
+    - 자격 증명이 없으면: 개발 환경에서는 목(mock) 문구가 들어가고, 프로덕션에서는 전사 없이 `transcript`가 null일 수 있습니다. 클라이언트에서 `transcript` 필드를 함께 보내면 그 값이 우선입니다.
   version: 1.0.0
   contact:
     name: 핑이 팀
@@ -35,6 +40,26 @@ tags:
     description: 귀가 체크인
 
 paths:
+  /health:
+    get:
+      tags: [Room]
+      summary: 헬스 체크
+      description: 서버 가동 여부 확인 (인증 불필요)
+      responses:
+        '200':
+          description: 정상
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  timestamp:
+                    type: string
+                    format: date-time
+
   /rooms:
     post:
       tags: [Room]
@@ -162,11 +187,14 @@ paths:
         '403':
           $ref: '#/components/responses/Forbidden'
 
-  /rooms/{code}/pingi:
+  /rooms/{code}/pingi-time:
     post:
       tags: [Checkpoint]
-      summary: 핑이타임 수동 트리거
-      description: 방장만 호출 가능. 즉시 핑이타임을 시작합니다.
+      summary: 핑이타임 수동 트리거 (경로 별칭)
+      description: |
+        `POST /rooms/{code}/pingi`와 동일합니다.
+        JWT로 인증된 방 멤버면 호출 가능합니다 (방장 전용 아님).
+        `status=live`인 방에서만 가능하며, 직전 핑이타임 기준 최소 5분 간격입니다.
       security:
         - bearerAuth: []
       parameters:
@@ -178,10 +206,54 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Checkpoint'
-        '403':
-          $ref: '#/components/responses/Forbidden'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: 술자리가 아직 live가 아님
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
         '429':
-          description: 너무 자주 트리거 (5분에 1회 제한)
+          description: 5분 간격 제한 — 남은 대기 시간 메시지
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /rooms/{code}/pingi:
+    post:
+      tags: [Checkpoint]
+      summary: 핑이타임 수동 트리거
+      description: |
+        JWT로 인증된 방 멤버면 호출 가능합니다 (방장 전용 아님).
+        `status=live`인 방에서만 가능하며, 직전 핑이타임 기준 최소 5분 간격입니다.
+        `POST /rooms/{code}/pingi-time` 과 동일 동작입니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RoomCode'
+      responses:
+        '201':
+          description: 핑이타임 시작
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Checkpoint'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          description: 술자리가 아직 live가 아님
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: 5분 간격 제한 — 남은 대기 시간 메시지
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
   /members/{memberId}:
     patch:
@@ -286,13 +358,45 @@ paths:
             application/json:
               schema:
                 type: object
+                required:
+                  - baselineId
+                  - allCompleted
                 properties:
                   baselineId:
                     type: string
-                  featureVector:
-                    type: object
+                  allCompleted:
+                    type: boolean
+                    description: 방의 모든 멤버 베이스라인 업로드가 끝났는지
         '400':
           description: 오디오 파일 오류 (너무 짧음, 노이즈 등)
+
+  /members/{memberId}/baseline/complete:
+    post:
+      tags: [Baseline]
+      summary: 베이스라인 완료 표시
+      description: |
+        클라이언트가 베이스라인 플로우를 마쳤을 때 호출합니다.
+        모든 멤버가 완료하면 `allCompleted: true`가 됩니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/MemberId'
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - allCompleted
+                properties:
+                  allCompleted:
+                    type: boolean
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /checkpoints/{checkpointId}/recordings:
     post:
@@ -327,6 +431,27 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RecordingResult'
+
+  /checkpoints/{checkpointId}/results:
+    get:
+      tags: [Checkpoint]
+      summary: 핑이타임 결과·랭킹 조회
+      description: 해당 체크포인트의 제출 녹음 기준 랭킹·경고 목록 (인증 불필요)
+      parameters:
+        - name: checkpointId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CheckpointResults'
+        '404':
+          $ref: '#/components/responses/NotFound'
 
   /rooms/{code}/report:
     get:
@@ -385,6 +510,9 @@ paths:
                   type: string
                   format: binary
                   description: 후기 녹음 (선택)
+                transcript:
+                  type: string
+                  description: 클라이언트 STT 텍스트 (선택, audio 없을 때 등)
       responses:
         '200':
           description: 체크인 완료
@@ -558,6 +686,14 @@ components:
         scheduledAt:
           type: string
           format: date-time
+        startedAt:
+          type: string
+          format: date-time
+          nullable: true
+        endedAt:
+          type: string
+          format: date-time
+          nullable: true
         status:
           type: string
           enum: [waiting, live, ended]
@@ -585,6 +721,7 @@ components:
           type: boolean
         etaPreset:
           type: string
+          nullable: true
           enum: [ontime, late5, late10, late20]
         hungerLevel:
           type: integer
@@ -595,10 +732,25 @@ components:
           type: integer
           minimum: 0
           maximum: 5
+          description: 현재 취도 레벨
         drinks:
           type: object
           additionalProperties:
             type: integer
+          description: 종류별 잔수 (soju, beer, somaek, wine, liquor)
+        sojuEquivalent:
+          type: number
+          description: 소주 환산 잔수
+        homeCheckinAt:
+          type: string
+          format: date-time
+          nullable: true
+        homeCheckinTranscript:
+          type: string
+          nullable: true
+        homeCheckinAudioUrl:
+          type: string
+          nullable: true
 
     UpdateMemberRequest:
       type: object
@@ -609,6 +761,9 @@ components:
         arrivalEta:
           type: string
           format: date-time
+        etaPreset:
+          type: string
+          enum: [ontime, late5, late10, late20]
         hungerLevel:
           type: integer
           minimum: 0
@@ -655,9 +810,56 @@ components:
           type: integer
         sentence:
           type: string
-        startedAt:
+        triggeredAt:
           type: string
           format: date-time
+        triggerType:
+          type: string
+          enum: [auto, manual]
+        status:
+          type: string
+          enum: [pending, completed]
+
+    CheckpointResults:
+      type: object
+      properties:
+        checkpointId:
+          type: string
+        index:
+          type: integer
+        rankings:
+          type: array
+          items:
+            type: object
+            properties:
+              memberId:
+                type: string
+              nickname:
+                type: string
+              breed:
+                type: string
+                nullable: true
+              level:
+                type: integer
+              previousLevel:
+                type: integer
+              delta:
+                type: integer
+        topDrunk:
+          type: string
+          description: 랭킹 1위 memberId (없으면 빈 문자열)
+        warnings:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+                example: hunger
+              memberId:
+                type: string
+              message:
+                type: string
 
     RecordingResult:
       type: object

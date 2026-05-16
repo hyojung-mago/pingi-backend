@@ -25,10 +25,10 @@ export async function uploadRecording(
     const result = await checkpointService.uploadRecording(
       checkpointId,
       memberId,
-      file.path
+      file
     );
 
-    res.status(201).json(result);
+    res.status(201).json({ recording: result });
   } catch (error) {
     next(error);
   }

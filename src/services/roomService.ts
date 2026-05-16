@@ -5,11 +5,10 @@
  * Prisma를 통해 DB와 통신하며 RoomResponse 형태로 데이터를 변환한다.
  */
 import { prisma } from '../lib/prisma';
-import { generateId, generateRoomCode } from '../utils';
+import { generateId, generateRoomCode, aggregateDrinks } from '../utils';
 import { AppError } from '../middleware/errorHandler';
 import { config } from '../config';
-import type { RoomResponse, MemberResponse, DrinkType } from '../types';
-import { aggregateDrinks } from '../utils';
+import type { RoomResponse, MemberResponse } from '../types';
 
 const MAX_MEMBERS_PER_ROOM = 10;
 const MAX_CODE_RETRIES = 5;
@@ -158,13 +157,20 @@ export async function getRoomByCode(code: string): Promise<RoomResponse> {
   return formatRoom(room);
 }
 
-export async function addMemberToRoom(
+export async function addMember(
   code: string,
   nickname: string
-): Promise<{ room: RoomResponse; memberId: string }> {
+): Promise<{ member: MemberResponse; room: RoomResponse }> {
   const room = await prisma.room.findUnique({
     where: { code },
-    include: { members: true },
+    include: { 
+      members: {
+        include: {
+          drinks: true,
+          homeCheckin: true,
+        },
+      },
+    },
   });
 
   if (!room) {
@@ -179,18 +185,22 @@ export async function addMemberToRoom(
     throw new AppError(409, 'ROOM_FULL', '방이 가득 찼어요 (최대 10명)');
   }
 
-  const existingMember = room.members.find((m) => m.nickname === nickname);
+  const existingMember = room.members.find((m: { nickname: string }) => m.nickname === nickname);
   if (existingMember) {
     throw new AppError(409, 'NICKNAME_TAKEN', '이미 사용 중인 닉네임이에요');
   }
 
   const memberId = generateId('member');
 
-  await prisma.member.create({
+  const newMember = await prisma.member.create({
     data: {
       id: memberId,
       roomId: room.id,
       nickname,
+    },
+    include: {
+      drinks: true,
+      homeCheckin: true,
     },
   });
 
@@ -207,12 +217,15 @@ export async function addMemberToRoom(
   });
 
   return {
+    member: formatMember(newMember),
     room: formatRoom(updatedRoom!),
-    memberId,
   };
 }
 
-export async function startRoom(code: string): Promise<RoomResponse> {
+export async function startRoom(
+  code: string,
+  _memberId: string
+): Promise<{ status: string; startedAt: string }> {
   const room = await prisma.room.findUnique({
     where: { code },
   });
@@ -225,26 +238,26 @@ export async function startRoom(code: string): Promise<RoomResponse> {
     throw new AppError(400, 'ROOM_ALREADY_STARTED', '이미 시작된 술자리에요');
   }
 
-  const updatedRoom = await prisma.room.update({
+  const startedAt = new Date();
+
+  await prisma.room.update({
     where: { code },
     data: {
       status: 'live',
-      startedAt: new Date(),
-    },
-    include: {
-      members: {
-        include: {
-          drinks: true,
-          homeCheckin: true,
-        },
-      },
+      startedAt,
     },
   });
 
-  return formatRoom(updatedRoom);
+  return {
+    status: 'live',
+    startedAt: startedAt.toISOString(),
+  };
 }
 
-export async function endRoom(code: string): Promise<{ room: RoomResponse; reportId: string }> {
+export async function endRoom(
+  code: string,
+  _memberId: string
+): Promise<{ status: string; reportId: string }> {
   const room = await prisma.room.findUnique({
     where: { code },
   });
@@ -259,24 +272,16 @@ export async function endRoom(code: string): Promise<{ room: RoomResponse; repor
 
   const reportId = generateId('report');
 
-  const updatedRoom = await prisma.room.update({
+  await prisma.room.update({
     where: { code },
     data: {
       status: 'ended',
       endedAt: new Date(),
     },
-    include: {
-      members: {
-        include: {
-          drinks: true,
-          homeCheckin: true,
-        },
-      },
-    },
   });
 
   return {
-    room: formatRoom(updatedRoom),
+    status: 'ended',
     reportId,
   };
 }

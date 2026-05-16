@@ -22,11 +22,12 @@ export async function getMemberById(memberId: string) {
     include: { 
       drinks: true,
       room: true,
+      homeCheckin: true,
     },
   });
 
   if (!member) {
-    throw AppError.notFound('멤버');
+    throw AppError.notFound('멤버를 찾을 수 없어요');
   }
 
   return member;
@@ -41,7 +42,7 @@ export async function updateMember(
   });
 
   if (!member) {
-    throw AppError.notFound('멤버');
+    throw AppError.notFound('멤버를 찾을 수 없어요');
   }
 
   const updated = await prisma.member.update({
@@ -53,7 +54,10 @@ export async function updateMember(
       ...(data.arrived !== undefined && { arrived: data.arrived }),
       ...(data.etaPreset && { etaPreset: data.etaPreset }),
     },
-    include: { drinks: true },
+    include: { 
+      drinks: true,
+      homeCheckin: true,
+    },
   });
 
   return formatMember(updated);
@@ -70,7 +74,7 @@ export async function addDrink(
   });
 
   if (!member) {
-    throw AppError.notFound('멤버');
+    throw AppError.notFound('멤버를 찾을 수 없어요');
   }
 
   await prisma.drink.create({
@@ -100,7 +104,7 @@ export async function getDrinkStatus(memberId: string): Promise<DrinkStatus> {
   });
 
   if (!member) {
-    throw AppError.notFound('멤버');
+    throw AppError.notFound('멤버를 찾을 수 없어요');
   }
 
   const drinks = aggregateDrinks(member.drinks);
@@ -112,15 +116,18 @@ export async function getDrinkStatus(memberId: string): Promise<DrinkStatus> {
 export async function getMembersByRoomId(roomId: string) {
   return prisma.member.findMany({
     where: { roomId },
-    include: { drinks: true },
-    orderBy: { createdAt: 'asc' },
+    include: { 
+      drinks: true,
+      homeCheckin: true,
+    },
+    orderBy: { joinedAt: 'asc' },
   });
 }
 
 export async function updateMemberLevel(memberId: string, level: number) {
   return prisma.member.update({
     where: { id: memberId },
-    data: { level },
+    data: { currentLevel: level },
   });
 }
 
@@ -132,10 +139,12 @@ function formatMember(member: {
   arrived: boolean;
   etaPreset: string | null;
   hungerLevel: number;
-  level: number;
+  currentLevel: number;
   drinks: { type: string; delta: number }[];
+  homeCheckin: { arrivedAt: Date; transcript: string | null; audioUrl: string | null } | null;
 }): MemberResponse {
   const drinks = aggregateDrinks(member.drinks);
+  const sojuEquivalent = toSojuEquivalent(drinks);
   
   return {
     id: member.id,
@@ -145,7 +154,11 @@ function formatMember(member: {
     arrived: member.arrived,
     etaPreset: member.etaPreset as EtaPreset | null,
     hungerLevel: member.hungerLevel,
-    level: member.level,
-    drinks: drinks as Record<DrinkType, number>,
+    level: member.currentLevel,
+    drinks,
+    sojuEquivalent,
+    homeCheckinAt: member.homeCheckin?.arrivedAt?.toISOString() || null,
+    homeCheckinTranscript: member.homeCheckin?.transcript || null,
+    homeCheckinAudioUrl: member.homeCheckin?.audioUrl || null,
   };
 }

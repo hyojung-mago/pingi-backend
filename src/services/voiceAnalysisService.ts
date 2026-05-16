@@ -30,19 +30,17 @@ export function getRandomSentence(): string {
 
 export async function analyzeRecording(
   _audioPath: string,
-  baseline: Baseline,
+  _baseline: Baseline,
   _sentence: string,
   previousLevel: number
 ): Promise<AnalysisResult> {
-  const baselineVector = baseline.featureVector as Record<string, number> | null;
-  const baselineClarity = baselineVector?.clarity ?? 0.9;
-  
+  const baselineClarity = 0.9;
   const currentClarity = generateMockCurrentClarity(baselineClarity, previousLevel);
   
   const changeRate = calculateChangeRate(baselineClarity, currentClarity);
   const level = calculateLevel(changeRate);
   
-  const score = Math.max(0, Math.min(1, changeRate / 100));
+  const score = Math.max(0, Math.min(1, Math.abs(changeRate) / 100));
 
   return {
     score: Math.round(score * 100) / 100,

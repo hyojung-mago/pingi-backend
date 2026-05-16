@@ -11,6 +11,7 @@ import * as homeCheckinService from '../services/homeCheckinService';
 import { AppError } from '../middleware/errorHandler';
 import type { UpdateMemberRequest, AddDrinkRequest } from '../types';
 import { emitMemberUpdated, emitAllBaselineComplete, emitHomeCheckinResult } from '../websocket';
+import { multerFileToPublicRelativePath } from '../utils';
 
 export async function updateMember(
   req: Request<{ memberId: string }, object, UpdateMemberRequest>,
@@ -31,9 +32,9 @@ export async function updateMember(
     emitMemberUpdated(roomCode, {
       id: member.id,
       nickname: member.nickname,
-      breed: member.breed,
+      breed: member.breed ?? undefined,
       arrived: member.arrived,
-      etaPreset: member.etaPreset,
+      etaPreset: member.etaPreset ?? undefined,
     });
 
     res.json(member);
@@ -91,21 +92,20 @@ export async function uploadBaseline(
     const result = await baselineService.uploadBaseline({
       memberId,
       audioUrls: [
-        files.audio_1[0]!.path,
-        files.audio_2[0]!.path,
-        files.audio_3[0]!.path,
+        multerFileToPublicRelativePath(files.audio_1[0]!),
+        multerFileToPublicRelativePath(files.audio_2[0]!),
+        multerFileToPublicRelativePath(files.audio_3[0]!),
       ],
       sentences: [sentence1, sentence2, sentence3],
     });
 
     // 모든 멤버가 베이스라인 완료했으면 WebSocket 이벤트 전송
-    if (result.allCompleted) {
+    if (result.allCompleted && result.roomCode) {
       emitAllBaselineComplete(result.roomCode);
     }
 
     res.status(201).json({
       baselineId: result.baselineId,
-      featureVector: result.featureVector,
       allCompleted: result.allCompleted,
     });
   } catch (error) {
@@ -132,7 +132,10 @@ export async function completeBaseline(
       emitAllBaselineComplete(result.roomCode);
     }
 
-    res.json({ allCompleted: result.allCompleted });
+    res.json({
+      message: '베이스라인 완료 처리됨',
+      allCompleted: result.allCompleted,
+    });
   } catch (error) {
     next(error);
   }
@@ -153,14 +156,21 @@ export async function homeCheckin(
     const file = req.file;
     const clientTranscript = req.body.transcript as string | undefined;
     
+    const audioPublicPath = file ? multerFileToPublicRelativePath(file) : undefined;
+
     const result = await homeCheckinService.createHomeCheckin(
       memberId,
-      file?.path,
+      audioPublicPath,
       clientTranscript
     );
 
     // WebSocket: 귀가 체크인 알림
-    emitHomeCheckinResult(result.roomCode, result.member, result.arrivedAt);
+    emitHomeCheckinResult(
+      result.roomCode,
+      result.member,
+      result.arrivedAt,
+      result.transcript
+    );
 
     res.json({
       arrivedAt: result.arrivedAt,

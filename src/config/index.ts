@@ -23,6 +23,7 @@ export const config = {
   
   upload: {
     dir: process.env.UPLOAD_DIR || './uploads',
+    /** API 명세(07-API) 기준 기본 500KB. 더 필요하면 MAX_FILE_SIZE 환경 변수로 상향 */
     maxFileSize: parseInt(process.env.MAX_FILE_SIZE || '500000', 10),
   },
   

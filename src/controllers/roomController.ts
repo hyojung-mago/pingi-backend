@@ -28,6 +28,7 @@ export async function createRoom(
 
     const token = generateToken({
       memberId: hostId,
+      roomId: room.id,
       roomCode: room.code,
       isHost: true,
     });
@@ -72,6 +73,7 @@ export async function joinRoom(
 
     const token = generateToken({
       memberId: member.id,
+      roomId: room.id,
       roomCode: code,
       isHost: false,
     });
@@ -104,7 +106,7 @@ export async function startRoom(
     const result = await roomService.startRoom(code, memberId);
     
     // WebSocket: 방 시작 알림 (모든 멤버가 Live로 이동)
-    emitRoomStarted(code, result.startedAt);
+    emitRoomStarted(code, new Date(result.startedAt));
 
     res.json(result);
   } catch (error) {
