@@ -14,7 +14,7 @@ npm run dev
 
 # 환경변수 설정 (.env)
 VITE_API_URL=http://localhost:8000/v1
-VITE_WS_URL=ws://localhost:8000/v1/ws
+VITE_WS_URL=http://localhost:8000
 ```
 
 ---
