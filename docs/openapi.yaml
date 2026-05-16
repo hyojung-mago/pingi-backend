@@ -1,0 +1,758 @@
+openapi: 3.0.3
+info:
+  title: 핑이 API
+  description: |
+    핑이 - 음성 기반 음주 추적 웹앱 API
+    
+    ## 인증
+    - 방 생성/입장 시 JWT 토큰 발급
+    - `Authorization: Bearer <token>` 헤더로 인증
+    
+    ## WebSocket
+    - 실시간 이벤트: `wss://api.pingi.app/v1/ws?room={code}&token={token}`
+  version: 1.0.0
+  contact:
+    name: 핑이 팀
+
+servers:
+  - url: https://api.pingi.app/v1
+    description: Production
+  - url: http://localhost:8000/v1
+    description: Local Development
+
+tags:
+  - name: Room
+    description: 방 관리
+  - name: Member
+    description: 멤버 관리
+  - name: Baseline
+    description: 베이스라인 녹음
+  - name: Checkpoint
+    description: 핑이타임 (취도 측정)
+  - name: Report
+    description: 결과 리포트
+  - name: Home
+    description: 귀가 체크인
+
+paths:
+  /rooms:
+    post:
+      tags: [Room]
+      summary: 방 생성
+      description: 새 술자리 방을 생성하고 방장 토큰을 발급받습니다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateRoomRequest'
+            example:
+              hostNickname: "민준"
+              location: "강남역 4번출구"
+              scheduledAt: "2026-05-16T19:30:00Z"
+      responses:
+        '201':
+          description: 방 생성 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateRoomResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '429':
+          $ref: '#/components/responses/RateLimit'
+
+  /rooms/{code}:
+    get:
+      tags: [Room]
+      summary: 방 정보 조회
+      description: 방 코드로 방 정보와 멤버 목록을 조회합니다.
+      parameters:
+        - $ref: '#/components/parameters/RoomCode'
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Room'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /rooms/{code}/members:
+    post:
+      tags: [Member]
+      summary: 방 입장
+      description: 방에 새 멤버로 입장하고 토큰을 발급받습니다.
+      parameters:
+        - $ref: '#/components/parameters/RoomCode'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/JoinRoomRequest'
+            example:
+              nickname: "수진"
+      responses:
+        '201':
+          description: 입장 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/JoinRoomResponse'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: 닉네임 중복 또는 방 정원 초과
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /rooms/{code}/start:
+    post:
+      tags: [Room]
+      summary: 술자리 시작
+      description: 방장만 호출 가능. 베이스라인 녹음 완료 후 술자리를 시작합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RoomCode'
+      responses:
+        '200':
+          description: 시작 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "live"
+                  startedAt:
+                    type: string
+                    format: date-time
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /rooms/{code}/end:
+    post:
+      tags: [Room]
+      summary: 술자리 종료
+      description: 방장만 호출 가능. 술자리를 종료하고 최종 리포트를 생성합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RoomCode'
+      responses:
+        '200':
+          description: 종료 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: "ended"
+                  reportId:
+                    type: string
+                    example: "rpt_xxx"
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /rooms/{code}/pingi:
+    post:
+      tags: [Checkpoint]
+      summary: 핑이타임 수동 트리거
+      description: 방장만 호출 가능. 즉시 핑이타임을 시작합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/RoomCode'
+      responses:
+        '201':
+          description: 핑이타임 시작
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Checkpoint'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '429':
+          description: 너무 자주 트리거 (5분에 1회 제한)
+
+  /members/{memberId}:
+    patch:
+      tags: [Member]
+      summary: 멤버 정보 업데이트
+      description: 캐릭터, 도착 정보, 공복 상태 등을 업데이트합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/MemberId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateMemberRequest'
+            example:
+              breed: "retriever"
+              arrivalEta: "2026-05-16T19:40:00Z"
+              hungerLevel: 2
+              arrived: true
+      responses:
+        '200':
+          description: 업데이트 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Member'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /members/{memberId}/drinks:
+    post:
+      tags: [Member]
+      summary: 잔수 추가/삭제
+      description: 음주 로그를 기록합니다. 소주 환산 기준으로 계산.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/MemberId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AddDrinkRequest'
+            example:
+              type: "soju"
+              delta: 1
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DrinkStatus'
+
+  /members/{memberId}/baseline:
+    post:
+      tags: [Baseline]
+      summary: 베이스라인 업로드
+      description: 3회차 베이스라인 음성을 업로드합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/MemberId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - audio_1
+                - audio_2
+                - audio_3
+                - sentence_1
+                - sentence_2
+                - sentence_3
+              properties:
+                audio_1:
+                  type: string
+                  format: binary
+                  description: 첫 번째 녹음 (WAV, 16kHz, mono)
+                audio_2:
+                  type: string
+                  format: binary
+                audio_3:
+                  type: string
+                  format: binary
+                sentence_1:
+                  type: string
+                  description: 첫 번째 문장
+                sentence_2:
+                  type: string
+                sentence_3:
+                  type: string
+      responses:
+        '201':
+          description: 업로드 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  baselineId:
+                    type: string
+                  featureVector:
+                    type: object
+        '400':
+          description: 오디오 파일 오류 (너무 짧음, 노이즈 등)
+
+  /checkpoints/{checkpointId}/recordings:
+    post:
+      tags: [Checkpoint]
+      summary: 핑이타임 녹음 업로드
+      description: 핑이타임 중 녹음한 음성을 업로드합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: checkpointId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - audio
+              properties:
+                audio:
+                  type: string
+                  format: binary
+                  description: 녹음 파일 (WAV, 16kHz, mono, ~5초)
+      responses:
+        '201':
+          description: 분석 완료
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RecordingResult'
+
+  /rooms/{code}/report:
+    get:
+      tags: [Report]
+      summary: 최종 리포트 조회
+      description: 술자리 종료 후 최종 리포트를 조회합니다.
+      parameters:
+        - $ref: '#/components/parameters/RoomCode'
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FinalReport'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /rooms/{code}/share-card:
+    get:
+      tags: [Report]
+      summary: 인스타 카드 데이터
+      description: 인스타그램 공유 카드 렌더링용 데이터를 조회합니다.
+      parameters:
+        - $ref: '#/components/parameters/RoomCode'
+        - name: aspect
+          in: query
+          schema:
+            type: string
+            enum: ['9:16', '1:1']
+            default: '9:16'
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ShareCardData'
+
+  /members/{memberId}/home:
+    post:
+      tags: [Home]
+      summary: 귀가 체크인
+      description: 귀가 완료를 알리고, 선택적으로 후기 음성을 업로드합니다.
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/MemberId'
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                audio:
+                  type: string
+                  format: binary
+                  description: 후기 녹음 (선택)
+      responses:
+        '200':
+          description: 체크인 완료
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  arrivedAt:
+                    type: string
+                    format: date-time
+                  transcript:
+                    type: string
+                    description: STT 변환 텍스트
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    RoomCode:
+      name: code
+      in: path
+      required: true
+      description: 6자리 방 코드
+      schema:
+        type: string
+        pattern: '^[A-Z0-9]{6}$'
+        example: "ABCDEF"
+    
+    MemberId:
+      name: memberId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: "m_xxx"
+
+  responses:
+    BadRequest:
+      description: 잘못된 요청
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    
+    Unauthorized:
+      description: 인증 필요
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: "UNAUTHORIZED"
+              message: "인증이 필요해요"
+    
+    Forbidden:
+      description: 권한 없음 (방장 전용)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: "FORBIDDEN"
+              message: "방장만 할 수 있어요"
+    
+    NotFound:
+      description: 리소스 없음
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: "ROOM_NOT_FOUND"
+              message: "방을 찾을 수 없어요"
+    
+    RateLimit:
+      description: 요청 제한 초과
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
+
+    CreateRoomRequest:
+      type: object
+      required:
+        - hostNickname
+        - location
+        - scheduledAt
+      properties:
+        hostNickname:
+          type: string
+          minLength: 1
+          maxLength: 10
+        location:
+          type: string
+          maxLength: 30
+        scheduledAt:
+          type: string
+          format: date-time
+
+    CreateRoomResponse:
+      type: object
+      properties:
+        room:
+          $ref: '#/components/schemas/Room'
+        host:
+          type: object
+          properties:
+            id:
+              type: string
+            nickname:
+              type: string
+            token:
+              type: string
+
+    JoinRoomRequest:
+      type: object
+      required:
+        - nickname
+      properties:
+        nickname:
+          type: string
+          minLength: 1
+          maxLength: 10
+
+    JoinRoomResponse:
+      type: object
+      properties:
+        member:
+          type: object
+          properties:
+            id:
+              type: string
+            nickname:
+              type: string
+            token:
+              type: string
+        room:
+          $ref: '#/components/schemas/Room'
+
+    Room:
+      type: object
+      properties:
+        id:
+          type: string
+        code:
+          type: string
+        location:
+          type: string
+        scheduledAt:
+          type: string
+          format: date-time
+        status:
+          type: string
+          enum: [waiting, live, ended]
+        shareUrl:
+          type: string
+        members:
+          type: array
+          items:
+            $ref: '#/components/schemas/Member'
+
+    Member:
+      type: object
+      properties:
+        id:
+          type: string
+        nickname:
+          type: string
+        breed:
+          type: string
+          enum: [retriever, pomeranian, shiba, dachshund, poodle, bulldog]
+          nullable: true
+        isHost:
+          type: boolean
+        arrived:
+          type: boolean
+        etaPreset:
+          type: string
+          enum: [ontime, late5, late10, late20]
+        hungerLevel:
+          type: integer
+          minimum: 0
+          maximum: 3
+          description: "0=방금먹음, 1=좀출출, 2=배고픔, 3=종일굶음"
+        level:
+          type: integer
+          minimum: 0
+          maximum: 5
+        drinks:
+          type: object
+          additionalProperties:
+            type: integer
+
+    UpdateMemberRequest:
+      type: object
+      properties:
+        breed:
+          type: string
+          enum: [retriever, pomeranian, shiba, dachshund, poodle, bulldog]
+        arrivalEta:
+          type: string
+          format: date-time
+        hungerLevel:
+          type: integer
+          minimum: 0
+          maximum: 3
+        arrived:
+          type: boolean
+
+    AddDrinkRequest:
+      type: object
+      required:
+        - type
+        - delta
+      properties:
+        type:
+          type: string
+          enum: [soju, beer, somaek, wine, liquor]
+        delta:
+          type: integer
+          description: "+1 또는 -1"
+
+    DrinkStatus:
+      type: object
+      properties:
+        drinks:
+          type: object
+          additionalProperties:
+            type: integer
+          example:
+            soju: 2
+            beer: 1
+        sojuEquivalent:
+          type: number
+          description: "소주 환산 잔수"
+          example: 2.5
+
+    Checkpoint:
+      type: object
+      properties:
+        id:
+          type: string
+        roomId:
+          type: string
+        index:
+          type: integer
+        sentence:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+
+    RecordingResult:
+      type: object
+      properties:
+        recording:
+          type: object
+          properties:
+            id:
+              type: string
+            score:
+              type: number
+              description: "0~1 사이 취도 점수"
+            level:
+              type: integer
+              minimum: 0
+              maximum: 5
+            previousLevel:
+              type: integer
+            delta:
+              type: integer
+              description: "레벨 변화량"
+
+    FinalReport:
+      type: object
+      properties:
+        awards:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+                enum: [top_drunk, liver_guardian, pacemaker, accelerator]
+              memberId:
+                type: string
+              nickname:
+                type: string
+              breed:
+                type: string
+              description:
+                type: string
+        badges:
+          type: array
+          items:
+            type: object
+            properties:
+              emoji:
+                type: string
+              name:
+                type: string
+              winner:
+                type: string
+              reason:
+                type: string
+        timeline:
+          type: array
+          items:
+            type: object
+            properties:
+              time:
+                type: string
+              levels:
+                type: array
+                items:
+                  type: integer
+        stats:
+          type: object
+          properties:
+            pingiTimeCount:
+              type: integer
+            maxLevelMember:
+              type: object
+              properties:
+                nickname:
+                  type: string
+                level:
+                  type: integer
+
+    ShareCardData:
+      type: object
+      properties:
+        date:
+          type: string
+        location:
+          type: string
+        winner:
+          type: string
+        members:
+          type: array
+          items:
+            type: object
+            properties:
+              nickname:
+                type: string
+              breed:
+                type: string
+              level:
+                type: integer

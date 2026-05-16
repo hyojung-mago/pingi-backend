@@ -1,0 +1,431 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>핑이 API 문서</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui.css">
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+    }
+    .swagger-ui .topbar {
+      background-color: #da291c;
+    }
+    .swagger-ui .topbar .download-url-wrapper .download-url-button {
+      background-color: #ffd166;
+      color: #2a1a0a;
+    }
+    .swagger-ui .info .title {
+      color: #da291c;
+    }
+    .swagger-ui .opblock.opblock-post {
+      border-color: #da291c;
+      background: rgba(218, 41, 28, 0.05);
+    }
+    .swagger-ui .opblock.opblock-post .opblock-summary-method {
+      background: #da291c;
+    }
+    .swagger-ui .opblock.opblock-get {
+      border-color: #27ae60;
+      background: rgba(39, 174, 96, 0.05);
+    }
+    .swagger-ui .opblock.opblock-get .opblock-summary-method {
+      background: #27ae60;
+    }
+    .swagger-ui .opblock.opblock-patch {
+      border-color: #f39c12;
+      background: rgba(243, 156, 18, 0.05);
+    }
+    .swagger-ui .opblock.opblock-patch .opblock-summary-method {
+      background: #f39c12;
+    }
+    .swagger-ui .btn.execute {
+      background-color: #da291c;
+      border-color: #da291c;
+    }
+    .swagger-ui .btn.execute:hover {
+      background-color: #b8231a;
+    }
+  </style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  
+  <script src="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui-bundle.js"></script>
+  <script src="https://unpkg.com/swagger-ui-dist@5.11.0/swagger-ui-standalone-preset.js"></script>
+  <script>
+    window.onload = function() {
+      // OpenAPI YAML 파일 직접 임베드
+      const spec = `
+openapi: 3.0.3
+info:
+  title: 핑이 API
+  description: |
+    핑이 - 음성 기반 음주 추적 웹앱 API
+    
+    ## 인증
+    - 방 생성/입장 시 JWT 토큰 발급
+    - \`Authorization: Bearer <token>\` 헤더로 인증
+    
+    ## WebSocket
+    - 실시간 이벤트: \`wss://api.pingi.app/v1/ws?room={code}&token={token}\`
+    
+    ## 소주 환산 기준
+    | 종류 | 환산 |
+    |------|------|
+    | 소주 | 1.0 |
+    | 맥주 | 0.5 |
+    | 소맥 | 0.8 |
+    | 와인 | 1.2 |
+    | 양주 | 2.0 |
+  version: 1.0.0
+  contact:
+    name: 핑이 팀
+
+servers:
+  - url: https://api.pingi.app/v1
+    description: Production
+  - url: http://localhost:8000/v1
+    description: Local Development
+
+tags:
+  - name: Room
+    description: 방 관리 (생성, 조회, 시작, 종료)
+  - name: Member
+    description: 멤버 관리 (입장, 정보 수정, 잔수 기록)
+  - name: Baseline
+    description: 베이스라인 녹음 (3회차)
+  - name: Checkpoint
+    description: 핑이타임 (취도 측정)
+  - name: Report
+    description: 결과 리포트 및 공유
+  - name: Home
+    description: 귀가 체크인
+
+paths:
+  /rooms:
+    post:
+      tags: [Room]
+      summary: 방 생성
+      description: 새 술자리 방을 생성하고 방장 토큰을 발급받습니다.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [hostNickname, location, scheduledAt]
+              properties:
+                hostNickname:
+                  type: string
+                  example: "민준"
+                location:
+                  type: string
+                  example: "강남역 4번출구"
+                scheduledAt:
+                  type: string
+                  format: date-time
+                  example: "2026-05-16T19:30:00Z"
+      responses:
+        '201':
+          description: 방 생성 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  room:
+                    type: object
+                    properties:
+                      id: { type: string, example: "r_xxx" }
+                      code: { type: string, example: "ABCDEF" }
+                      shareUrl: { type: string, example: "https://pingi.app/r/ABCDEF" }
+                      status: { type: string, example: "waiting" }
+                  host:
+                    type: object
+                    properties:
+                      id: { type: string, example: "m_xxx" }
+                      nickname: { type: string, example: "민준" }
+                      token: { type: string, example: "eyJ..." }
+
+  /rooms/{code}:
+    get:
+      tags: [Room]
+      summary: 방 정보 조회
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema:
+            type: string
+            example: "ABCDEF"
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  code: { type: string }
+                  location: { type: string }
+                  scheduledAt: { type: string, format: date-time }
+                  status: { type: string, enum: [waiting, live, ended] }
+                  members:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: string }
+                        nickname: { type: string }
+                        breed: { type: string, nullable: true }
+                        isHost: { type: boolean }
+                        arrived: { type: boolean }
+
+  /rooms/{code}/members:
+    post:
+      tags: [Member]
+      summary: 방 입장
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                nickname: { type: string, example: "수진" }
+      responses:
+        '201':
+          description: 입장 성공
+
+  /rooms/{code}/start:
+    post:
+      tags: [Room]
+      summary: 술자리 시작 (방장만)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 시작 성공
+
+  /rooms/{code}/end:
+    post:
+      tags: [Room]
+      summary: 술자리 종료 (방장만)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 종료 성공
+
+  /rooms/{code}/pingi:
+    post:
+      tags: [Checkpoint]
+      summary: 핑이타임 수동 트리거 (방장만)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '201':
+          description: 핑이타임 시작
+
+  /members/{memberId}:
+    patch:
+      tags: [Member]
+      summary: 멤버 정보 업데이트
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: memberId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                breed:
+                  type: string
+                  enum: [retriever, pomeranian, shiba, dachshund, poodle, bulldog]
+                arrivalEta: { type: string, format: date-time }
+                hungerLevel: { type: integer, minimum: 0, maximum: 3 }
+                arrived: { type: boolean }
+      responses:
+        '200':
+          description: 업데이트 성공
+
+  /members/{memberId}/drinks:
+    post:
+      tags: [Member]
+      summary: 잔수 추가/삭제
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: memberId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                type: { type: string, enum: [soju, beer, somaek, wine, liquor] }
+                delta: { type: integer, description: "+1 또는 -1" }
+      responses:
+        '200':
+          description: 성공
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  drinks: { type: object }
+                  sojuEquivalent: { type: number }
+
+  /members/{memberId}/baseline:
+    post:
+      tags: [Baseline]
+      summary: 베이스라인 업로드 (3회차)
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: memberId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                audio_1: { type: string, format: binary }
+                audio_2: { type: string, format: binary }
+                audio_3: { type: string, format: binary }
+                sentence_1: { type: string }
+                sentence_2: { type: string }
+                sentence_3: { type: string }
+      responses:
+        '201':
+          description: 업로드 성공
+
+  /checkpoints/{checkpointId}/recordings:
+    post:
+      tags: [Checkpoint]
+      summary: 핑이타임 녹음 업로드
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: checkpointId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                audio: { type: string, format: binary }
+      responses:
+        '201':
+          description: 분석 완료
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  recording:
+                    type: object
+                    properties:
+                      id: { type: string }
+                      score: { type: number }
+                      level: { type: integer }
+                      delta: { type: integer }
+
+  /rooms/{code}/report:
+    get:
+      tags: [Report]
+      summary: 최종 리포트 조회
+      parameters:
+        - name: code
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: 성공
+
+  /members/{memberId}/home:
+    post:
+      tags: [Home]
+      summary: 귀가 체크인
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - name: memberId
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                audio: { type: string, format: binary, description: "후기 녹음 (선택)" }
+      responses:
+        '200':
+          description: 체크인 완료
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+`;
+
+      const ui = SwaggerUIBundle({
+        spec: jsyaml.load(spec),
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [
+          SwaggerUIBundle.presets.apis,
+          SwaggerUIStandalonePreset
+        ],
+        plugins: [
+          SwaggerUIBundle.plugins.DownloadUrl
+        ],
+        layout: "StandaloneLayout",
+        defaultModelsExpandDepth: -1,
+        docExpansion: 'list',
+        filter: true,
+        showExtensions: true,
+        showCommonExtensions: true
+      });
+
+      window.ui = ui;
+    };
+  </script>
+  <script src="https://unpkg.com/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+</body>
+</html>
