@@ -9,7 +9,7 @@ services:
       - "25432:5432"
     environment:
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
+      POSTGRES_PASSWORD: pingi123!!
       POSTGRES_DB: pingi
     volumes:
       - postgres_data:/var/lib/postgresql/data

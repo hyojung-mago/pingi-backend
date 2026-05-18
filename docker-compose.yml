@@ -10,7 +10,7 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://postgres:password@pingi-postgres:5432/pingi?schema=public
+      DATABASE_URL: postgresql://postgres:pingi123!!@pingi-postgres:5432/pingi?schema=public
       NODE_ENV: development
       PORT: "8000"
     volumes:
