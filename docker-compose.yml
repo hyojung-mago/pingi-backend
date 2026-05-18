@@ -1,18 +1,26 @@
-version: '3.8'
+#Pingi-Backend Docker Compose
 
 services:
-  postgres:
-    image: postgres:16-alpine
-    container_name: pingi-postgres
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: pingi
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
+  app:
+    build: .
+    container_name: pingi-backend
     restart: unless-stopped
+    ports:
+      - "8100:8000"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql://postgres:password@pingi-postgres:5432/pingi?schema=public
+      NODE_ENV: development
+      PORT: "8000"
+    volumes:
+      - uploads_data:/app/uploads
+    networks:
+      - pingi_net
 
 volumes:
-  postgres_data:
+  uploads_data:
+
+networks:
+  pingi_net:
+    external: true

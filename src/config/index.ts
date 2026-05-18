@@ -28,7 +28,9 @@ export const config = {
   },
   
   cors: {
-    origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+    origin: (process.env.CORS_ORIGIN || 'http://localhost:5173')
+      .split(',')
+      .map((o: string) => o.trim()),
   },
   
   frontendUrl: process.env.FRONTEND_URL || 'https://pingi.app',

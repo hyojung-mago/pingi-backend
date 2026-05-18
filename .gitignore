@@ -32,3 +32,6 @@ npm-debug.log*
 # Prisma
 prisma/*.db
 prisma/*.db-journal
+
+/.history/
+/.cursor
