@@ -148,6 +148,38 @@ export function emitCheckpointResult(
   broadcastToRoom(roomCode, 'checkpoint_result', result);
 }
 
+export function emitRecordingProgress(
+  roomCode: string,
+  payload: {
+    checkpointId: string;
+    submittedCount: number;
+    totalCount: number;
+  }
+): void {
+  broadcastToRoom(roomCode, 'recording_progress', payload);
+}
+
+export function emitResultAckProgress(
+  roomCode: string,
+  payload: {
+    checkpointId: string;
+    ackedCount: number;
+    totalCount: number;
+  }
+): void {
+  broadcastToRoom(roomCode, 'result_ack_progress', payload);
+}
+
+export function emitPingiLiveResumed(
+  roomCode: string,
+  payload: {
+    checkpointId: string;
+    nextPingiEndsAt: string;
+  }
+): void {
+  broadcastToRoom(roomCode, 'pingi_live_resumed', payload);
+}
+
 export function emitRoomEnded(roomCode: string, reportId: string): void {
   broadcastToRoom(roomCode, 'room_ended', {
     status: 'ended',
