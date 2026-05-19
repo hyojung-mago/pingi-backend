@@ -2,11 +2,12 @@
  * @file services/baselineService.ts - 베이스라인 녹음 서비스
  *
  * 술자리 시작 전 멤버의 기준 발음(베이스라인)을 저장하고 관리한다.
- * 3개의 잰말 문장을 녹음하여 이후 핑이타임 비교의 기준으로 사용한다.
+ * 동일 문장 3회 녹음하여 이후 핑이타임 비교의 기준으로 사용한다.
  */
 import { prisma } from '../lib/prisma';
 import { generateId } from '../utils';
 import { AppError } from '../middleware/errorHandler';
+import { analyzeBaseline } from './voiceAnalysisService';
 import type { BaselineResult } from '../types';
 
 export interface BaselineUploadData {
@@ -29,6 +30,8 @@ export async function uploadBaseline(data: BaselineUploadData): Promise<Baseline
     where: { memberId: data.memberId },
   });
 
+  let baselineId: string;
+
   if (existingBaseline) {
     await prisma.baseline.update({
       where: { memberId: data.memberId },
@@ -42,43 +45,37 @@ export async function uploadBaseline(data: BaselineUploadData): Promise<Baseline
         recordedAt: new Date(),
       },
     });
-
-    await prisma.member.update({
-      where: { id: data.memberId },
-      data: { baselineCompleted: true },
+    baselineId = existingBaseline.id;
+  } else {
+    const baseline = await prisma.baseline.create({
+      data: {
+        id: generateId('baseline'),
+        memberId: data.memberId,
+        audioUrl1: data.audioUrls[0],
+        audioUrl2: data.audioUrls[1],
+        audioUrl3: data.audioUrls[2],
+        sentence1: data.sentences[0],
+        sentence2: data.sentences[1],
+        sentence3: data.sentences[2],
+      },
     });
-
-    const updatedRoom = await prisma.room.findUnique({
-      where: { id: member.roomId },
-      include: { members: true },
-    });
-
-    const allCompleted = updatedRoom!.members.every((m) => m.baselineCompleted);
-
-    return {
-      baselineId: existingBaseline.id,
-      allCompleted,
-      roomCode: member.room.code,
-    };
+    baselineId = baseline.id;
   }
-
-  const baseline = await prisma.baseline.create({
-    data: {
-      id: generateId('baseline'),
-      memberId: data.memberId,
-      audioUrl1: data.audioUrls[0],
-      audioUrl2: data.audioUrls[1],
-      audioUrl3: data.audioUrls[2],
-      sentence1: data.sentences[0],
-      sentence2: data.sentences[1],
-      sentence3: data.sentences[2],
-    },
-  });
 
   await prisma.member.update({
     where: { id: data.memberId },
     data: { baselineCompleted: true },
   });
+
+  try {
+    await analyzeBaseline(
+      [data.audioUrls[0], data.audioUrls[1], data.audioUrls[2]],
+      [data.sentences[0], data.sentences[1], data.sentences[2]],
+      data.memberId,
+    );
+  } catch (err) {
+    console.warn('[Baseline] AI 분석 건너뜀 (AI 서버 미실행?):', (err as Error).message);
+  }
 
   const updatedRoom = await prisma.room.findUnique({
     where: { id: member.roomId },
@@ -88,7 +85,7 @@ export async function uploadBaseline(data: BaselineUploadData): Promise<Baseline
   const allCompleted = updatedRoom!.members.every((m) => m.baselineCompleted);
 
   return {
-    baselineId: baseline.id,
+    baselineId,
     allCompleted,
     roomCode: member.room.code,
   };
