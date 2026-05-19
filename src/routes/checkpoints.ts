@@ -26,4 +26,11 @@ router.get(
   checkpointController.getCheckpointResults
 );
 
+router.post(
+  '/:checkpointId/ack',
+  validateParams(checkpointIdSchema),
+  authMiddleware,
+  checkpointController.acknowledgeCheckpointResult
+);
+
 export default router;
