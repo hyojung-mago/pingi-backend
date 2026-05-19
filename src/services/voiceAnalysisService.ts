@@ -1,73 +1,123 @@
 /**
  * @file services/voiceAnalysisService.ts - 음성 분석 서비스
  *
- * 베이스라인 대비 현재 발음의 변화율을 계산하여 취도 레벨을 판정한다.
- * 현재는 Mock 구현이며, 추후 Google Speech-to-Text 등으로 교체 가능하다.
+ * 핑이 AI 서비스(FastAPI)를 호출하여 음성 취도를 분석한다.
+ * AI 서비스가 DB에 결과를 직접 기록하고, 이 서비스는 응답을 반환한다.
+ *
+ * 흐름:
+ *   1. 백엔드 → POST AI_API/analyze (recording_id, audio_url, member_id)
+ *   2. AI 서비스 → openSMILE + SVM 분석 → DB 기록
+ *   3. 백엔드 ← 결과 응답
  */
-import { calculateLevel, calculateChangeRate } from '../utils';
-import type { Baseline } from '@prisma/client';
+
+import { getPingiPromptSentence } from '../constants/sentences';
+
+const AI_API_URL = process.env.AI_API_URL || 'http://localhost:8001';
 
 export interface AnalysisResult {
   score: number;
   level: number;
   changeRate: number;
+  levelDescription: string;
+  isFakeActing: boolean;
+  status: 'normal' | 'fake_acting' | 'drunk';
 }
 
-const PINGI_SENTENCES = [
-  '오늘 날씨가 참 좋네요 저녁은 뭘 먹을까요',
-  '간장 공장 공장장은 강 공장장이고 된장 공장 공장장은 장 공장장이다',
-  '저기 계신 저 분이 박 법학박사이시고 여기 계신 이 분이 백 법학박사이시다',
-  '경찰청 철창살은 외철창살이냐 쌍철창살이냐',
-  '들의 콩깍지는 깐 콩깍지인가 안 깐 콩깍지인가',
-  '고려고 교복은 고급 교복이고 고려고 교복은 고급 원단이다',
-  '상표 붙인 큰 깡통은 깐 깡통인가 안 깐 깡통인가',
-  '저분은 백 법학박사이고 이분은 박 법학박사이시다',
-];
+interface AIAnalyzeResponse {
+  score: number;
+  level: number;
+  level_description: string;
+  change_rate: number;
+  is_drunk: boolean;
+  confidence: string;
+  probability: number;
+  feature_changes: Record<string, number> | null;
+  is_fake_acting?: boolean;
+  status?: 'normal' | 'fake_acting' | 'drunk';
+  fake_probability?: number;
+}
 
+/** 핑이타임·베이스라인과 동일한 통일 문장 */
 export function getRandomSentence(): string {
-  return PINGI_SENTENCES[Math.floor(Math.random() * PINGI_SENTENCES.length)] ?? PINGI_SENTENCES[0]!;
+  return getPingiPromptSentence();
 }
 
+/**
+ * AI 서비스에 녹음 분석 요청.
+ * AI 서비스가 Recording/Member 테이블을 직접 업데이트한다.
+ */
 export async function analyzeRecording(
-  _audioPath: string,
-  _baseline: Baseline,
+  audioPath: string,
+  _baseline: unknown,
   _sentence: string,
-  previousLevel: number
+  previousLevel: number,
+  recordingId: string,
+  memberId: string,
 ): Promise<AnalysisResult> {
-  const baselineClarity = 0.9;
-  const currentClarity = generateMockCurrentClarity(baselineClarity, previousLevel);
-  
-  const changeRate = calculateChangeRate(baselineClarity, currentClarity);
-  const level = calculateLevel(changeRate);
-  
-  const score = Math.max(0, Math.min(1, Math.abs(changeRate) / 100));
+  const response = await fetch(`${AI_API_URL}/analyze`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      recording_id: recordingId,
+      member_id: memberId,
+      audio_url: audioPath,
+      previous_level: previousLevel,
+    }),
+    signal: AbortSignal.timeout(30000),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`AI 분석 실패 (${response.status}): ${error}`);
+  }
+
+  const data: AIAnalyzeResponse = await response.json();
 
   return {
-    score: Math.round(score * 100) / 100,
-    level,
-    changeRate: Math.round(changeRate * 100) / 100,
+    score: data.score,
+    level: data.level,
+    changeRate: data.change_rate,
+    levelDescription: data.level_description,
+    isFakeActing: data.is_fake_acting ?? false,
+    status: data.status ?? (data.is_drunk ? 'drunk' : 'normal'),
   };
 }
 
-function generateMockCurrentClarity(baselineClarity: number, previousLevel: number): number {
-  const levelFactor = previousLevel * 0.05;
-  const randomFactor = (Math.random() - 0.3) * 0.15;
-  const timeFactor = Math.random() * 0.1;
-  
-  const degradation = levelFactor + randomFactor + timeFactor;
-  const currentClarity = baselineClarity - degradation;
-  
-  return Math.max(0.1, Math.min(1, currentClarity));
-}
-
+/**
+ * 베이스라인 녹음 분석 요청.
+ * AI 서비스가 3개 오디오에서 피처 추출 → 평균 → DB 저장.
+ */
 export async function analyzeBaseline(
-  _audioPaths: string[],
-  _sentences: string[]
-): Promise<Record<string, number>> {
-  return {
-    clarity: 0.85 + Math.random() * 0.1,
-    speed: 0.9 + Math.random() * 0.1,
-    pitch: 0.8 + Math.random() * 0.15,
-    consistency: 0.88 + Math.random() * 0.1,
-  };
+  audioPaths: string[],
+  _sentences: string[],
+  memberId: string,
+): Promise<void> {
+  const response = await fetch(`${AI_API_URL}/analyze-baseline`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      member_id: memberId,
+      audio_urls: audioPaths,
+    }),
+  });
+
+  if (!response.ok) {
+    const error = await response.text();
+    throw new Error(`베이스라인 분석 실패 (${response.status}): ${error}`);
+  }
+
+  const data = await response.json();
+  console.log(`[VoiceAnalysis] 베이스라인 저장 완료: ${data.message}`);
+}
+
+/**
+ * AI 서비스 헬스 체크.
+ */
+export async function isAIServiceAvailable(): Promise<boolean> {
+  try {
+    const response = await fetch(`${AI_API_URL}/health`, { signal: AbortSignal.timeout(3000) });
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
