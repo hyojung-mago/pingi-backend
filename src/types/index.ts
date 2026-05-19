@@ -107,6 +107,9 @@ export interface RecordingResult {
   level: number;
   previousLevel: number;
   delta: number;
+  levelDescription?: string;
+  isFakeActing?: boolean;
+  status?: 'normal' | 'fake_acting' | 'drunk';
 }
 
 export interface BaselineResult {

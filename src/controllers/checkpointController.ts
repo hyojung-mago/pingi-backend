@@ -47,3 +47,18 @@ export async function getCheckpointResults(
     next(error);
   }
 }
+
+export async function acknowledgeCheckpointResult(
+  req: Request<{ checkpointId: string }>,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const { checkpointId } = req.params;
+    const memberId = req.user!.memberId;
+    const result = await checkpointService.acknowledgeCheckpointResult(checkpointId, memberId);
+    res.json(result);
+  } catch (error) {
+    next(error);
+  }
+}
