@@ -11,9 +11,18 @@ import { getRandomSentence, analyzeRecording } from './voiceAnalysisService';
 import { updateMemberLevel } from './memberService';
 import type { Checkpoint, RecordingResult } from '../types';
 import type { Express } from 'express';
-import { emitCheckpointResult } from '../websocket';
+import {
+  emitCheckpointResult,
+  emitPingiLiveResumed,
+  emitRecordingProgress,
+  emitResultAckProgress,
+} from '../websocket';
 
-const MIN_PINGI_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
+const MIN_PINGI_INTERVAL_MS = 30 * 1000; // 30 seconds
+const PINGI_ROUND_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes (front TEST_INTERVAL_MS)
+
+/** 체크포인트 결과 확인(ack) — 서버 재시작 시 초기화됨 */
+const acksByCheckpoint = new Map<string, Set<string>>();
 
 export async function createCheckpoint(roomId: string, _triggeredByMemberId: string): Promise<Checkpoint> {
   const room = await prisma.room.findUnique({
@@ -102,31 +111,58 @@ export async function uploadRecording(
   }
 
   const previousLevel = member.currentLevel;
-  
-  const analysis = await analyzeRecording(
-    diskPath,
-    member.baseline,
-    checkpoint.sentence,
-    previousLevel
-  );
-
   const recordingId = generateId('recording');
-  const delta = analysis.level - previousLevel;
 
+  // Recording을 먼저 생성 (AI 서비스가 결과를 업데이트함)
   await prisma.recording.create({
     data: {
       id: recordingId,
       checkpointId,
       memberId,
       audioUrl: publicAudioUrl,
+      score: 0,
+      level: 0,
+      previousLevel,
+      changeRate: 0,
+    },
+  });
+
+  // AI 서비스 호출 → DB에 score/level/changeRate 업데이트
+  const analysis = await analyzeRecording(
+    publicAudioUrl,
+    member.baseline,
+    checkpoint.sentence,
+    previousLevel,
+    recordingId,
+    memberId,
+  );
+
+  const delta = analysis.level - previousLevel;
+
+  // AI 서비스 응답으로 Recording 업데이트
+  await prisma.recording.update({
+    where: { id: recordingId },
+    data: {
       score: analysis.score,
       level: analysis.level,
-      previousLevel,
       changeRate: analysis.changeRate,
     },
   });
 
   await updateMemberLevel(memberId, analysis.level);
+
+  const cpWithRoom = await prisma.checkpoint.findUnique({
+    where: { id: checkpointId },
+    include: { room: { include: { members: true } } },
+  });
+  if (cpWithRoom) {
+    const submittedCount = await prisma.recording.count({ where: { checkpointId } });
+    emitRecordingProgress(cpWithRoom.room.code, {
+      checkpointId,
+      submittedCount,
+      totalCount: cpWithRoom.room.members.length,
+    });
+  }
 
   await finalizeCheckpointIfQuiet(checkpointId);
 
@@ -136,6 +172,9 @@ export async function uploadRecording(
     level: analysis.level,
     previousLevel,
     delta,
+    levelDescription: analysis.levelDescription,
+    isFakeActing: analysis.isFakeActing,
+    status: analysis.status,
   };
 }
 
@@ -233,4 +272,53 @@ export async function getCheckpointResults(checkpointId: string) {
     topDrunk,
     warnings,
   };
+}
+
+export async function acknowledgeCheckpointResult(
+  checkpointId: string,
+  memberId: string
+): Promise<{ ackedCount: number; totalCount: number; allConfirmed: boolean }> {
+  const checkpoint = await prisma.checkpoint.findUnique({
+    where: { id: checkpointId },
+    include: { room: { include: { members: true } } },
+  });
+
+  if (!checkpoint) {
+    throw AppError.notFound('핑이타임을 찾을 수 없어요');
+  }
+
+  if (checkpoint.status !== 'completed') {
+    throw AppError.conflict('아직 모든 멤버의 녹음이 끝나지 않았어요');
+  }
+
+  const isMember = checkpoint.room.members.some((m) => m.id === memberId);
+  if (!isMember) {
+    throw AppError.forbidden('이 방의 멤버만 확인할 수 있어요');
+  }
+
+  if (!acksByCheckpoint.has(checkpointId)) {
+    acksByCheckpoint.set(checkpointId, new Set());
+  }
+  acksByCheckpoint.get(checkpointId)!.add(memberId);
+
+  const totalCount = checkpoint.room.members.length;
+  const ackedCount = acksByCheckpoint.get(checkpointId)!.size;
+
+  emitResultAckProgress(checkpoint.room.code, {
+    checkpointId,
+    ackedCount,
+    totalCount,
+  });
+
+  const allConfirmed = ackedCount >= totalCount;
+  if (allConfirmed) {
+    acksByCheckpoint.delete(checkpointId);
+    const nextPingiEndsAt = new Date(Date.now() + PINGI_ROUND_INTERVAL_MS);
+    emitPingiLiveResumed(checkpoint.room.code, {
+      checkpointId,
+      nextPingiEndsAt: nextPingiEndsAt.toISOString(),
+    });
+  }
+
+  return { ackedCount, totalCount, allConfirmed };
 }
