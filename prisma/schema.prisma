@@ -82,6 +82,7 @@ model Baseline {
   sentence1  String   @map("sentence_1")
   sentence2  String   @map("sentence_2")
   sentence3  String   @map("sentence_3")
+  features   Bytes?   @map("features")
   recordedAt DateTime @default(now()) @map("recorded_at")
 
   member Member @relation(fields: [memberId], references: [id])
