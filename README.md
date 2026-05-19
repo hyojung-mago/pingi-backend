@@ -2,22 +2,13 @@
 
 > 발음·음성 기반 술자리 로그 API (Express + Prisma + Socket.io)
 
-## API 문서
-
-| 항목 | 위치 |
-|------|------|
-| OpenAPI 스펙 | `docs/openapi.yaml` |
-| Swagger UI | 서버 실행 후 **http://localhost:8000/api-docs** (YAML 로드) |
-| 구현 체크리스트 | `BACKEND-CHECKLIST.md` |
-| 도메인 상세 명세 | [pingi-docs `07-API.md`](https://github.com/hyojung-mago/pingi-docs) (별도 레포 시 로컬 경로 참고) |
-
-## 베이스 URL
+## 아키텍처
 
 ```
-REST:       http://localhost:8000/v1   (프로덕션: https://api.pingi.app/v1)
-헬스:       GET  /v1/health
-WebSocket:  Socket.io — `http://localhost:8000` + path `/v1/ws` (쿼리 `room`, `token`)
-정적 재생:  GET  /uploads/...
+프론트엔드 (5173) ←→ 백엔드 (8000) ←→ AI 서버 (8001)
+                      ↕                    ↕
+                   PostgreSQL          openSMILE + SVM
+                   Socket.io
 ```
 
 ## Quick Start
@@ -26,71 +17,105 @@ WebSocket:  Socket.io — `http://localhost:8000` + path `/v1/ws` (쿼리 `room`
 # 의존성
 npm install
 
-# DB (Docker)
-docker compose up -d
+# PostgreSQL (로컬 또는 Docker)
+brew services start postgresql    # macOS
+# docker compose up -d            # Docker
 
-# 환경 변수 (.env — .env.example 참고)
+# 환경 변수
 cp .env.example .env
+# DATABASE_URL, AI_API_URL 등 확인
 
 # 스키마 반영
 npx prisma generate
 npm run db:push
 
-# 개발 서버 (기본 포트 8000)
+# 개발 서버 (포트 8000)
 npm run dev
 ```
 
-### 선택: 귀가 음성 서버 STT (Google Cloud)
+### 환경 변수 (.env)
 
-`.env`에 서비스 계정 JSON 경로:
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
+| `DATABASE_URL` | — | PostgreSQL 연결 문자열 |
+| `AI_API_URL` | `http://localhost:8001` | Pingi-AI 서버 주소 |
+| `MAX_FILE_SIZE` | `5242880` | 업로드 파일 최대 크기 (5MB) |
+| `JWT_SECRET` | — | JWT 서명 키 |
+| `GOOGLE_APPLICATION_CREDENTIALS` | — | (선택) 귀가 STT용 서비스 계정 |
 
-```env
-GOOGLE_APPLICATION_CREDENTIALS=./your-credentials.json
+## 베이스 URL
+
+```
+REST:       http://localhost:8000/v1
+헬스:       GET /v1/health
+WebSocket:  Socket.io — http://localhost:8000 + path /v1/ws (쿼리 room, token)
+정적 파일:  GET /uploads/...
 ```
 
-없으면 개발 환경에서는 귀가 전사가 목(mock) 동작할 수 있습니다. 클라이언트가 `transcript`를 보내면 그 값이 우선입니다.
+## REST 라우트 (`/v1`)
 
-## 주요 REST 라우트 (모두 `/v1` 접두사)
-
-| 구분 | 메서드 | 경로 |
-|------|--------|------|
-| 방 | POST | `/rooms` |
-| 방 | GET | `/rooms/:code` |
-| 입장 | POST | `/rooms/:code/members` |
-| 시작/종료 | POST | `/rooms/:code/start`, `/end` |
-| 핑이 트리거 | POST | `/rooms/:code/pingi-time`, `/pingi` (동일) |
-| 리포트 | GET | `/rooms/:code/report`, `/share-card` |
-| 멤버 | PATCH | `/members/:id` |
-| 음주 | POST | `/members/:id/drinks` |
-| 베이스라인 | POST | `/members/:id/baseline`, `/baseline/complete` |
-| 귀가 | POST | `/members/:id/home` |
-| 핑이 녹음 | POST | `/checkpoints/:id/recordings` |
-| 핑이 결과 | GET | `/checkpoints/:id/results` |
+| 구분 | 메서드 | 경로 | 설명 |
+|------|--------|------|------|
+| 방 | POST | `/rooms` | 방 생성 |
+| 방 | GET | `/rooms/:code` | 방 정보 조회 |
+| 입장 | POST | `/rooms/:code/members` | 방 입장 |
+| 시작 | POST | `/rooms/:code/start` | 술자리 시작 (방장) |
+| 종료 | POST | `/rooms/:code/end` | 술자리 종료 (방장) |
+| 핑이 트리거 | POST | `/rooms/:code/pingi` | 핑이타임 시작 |
+| 리포트 | GET | `/rooms/:code/report` | 최종 리포트 |
+| 공유카드 | GET | `/rooms/:code/share-card` | 인스타 카드 데이터 |
+| 멤버 | PATCH | `/members/:id` | 멤버 정보 수정 |
+| 음주 | POST | `/members/:id/drinks` | 잔수 추가 |
+| 베이스라인 | POST | `/members/:id/baseline` | 베이스라인 녹음 업로드 |
+| 베이스라인 완료 | POST | `/members/:id/baseline/complete` | 베이스라인 완료 알림 |
+| 귀가 | POST | `/members/:id/home` | 귀가 체크인 |
+| 핑이 녹음 | POST | `/checkpoints/:id/recordings` | 핑이타임 녹음 업로드 |
+| 핑이 결과 | GET | `/checkpoints/:id/results` | 핑이타임 결과 조회 |
+| 결과 확인 | POST | `/checkpoints/:id/ack` | 결과 확인 (동기화) |
 
 ## WebSocket 이벤트 (서버 → 클라이언트)
 
-`member_joined`, `member_updated`, `room_started`, `all_baseline_complete`, `pingi_time_started`, `checkpoint_result`, `room_ended`, `home_checkin_result` 등 — 상세는 `docs/openapi.yaml` 및 `BACKEND-CHECKLIST.md`.
+| 이벤트 | 페이로드 | 설명 |
+|--------|----------|------|
+| `member_joined` | `{ memberId, nickname }` | 새 멤버 입장 |
+| `member_updated` | `{ memberId, ... }` | 멤버 정보 변경 |
+| `room_started` | `{ status, startedAt }` | 술자리 시작 |
+| `all_baseline_complete` | `{ roomCode }` | 모든 멤버 베이스라인 완료 |
+| `pingi_time_started` | `{ checkpointId, index, sentence, countdownSeconds }` | 핑이타임 시작 |
+| `recording_progress` | `{ checkpointId, submittedCount, totalCount }` | 녹음 제출 진행률 |
+| `checkpoint_result` | `{ checkpointId, index, rankings, topDrunk, warnings }` | 핑이타임 결과 (전원 녹음 완료 시) |
+| `result_ack_progress` | `{ checkpointId, ackedCount, totalCount }` | 결과 확인 진행률 |
+| `pingi_live_resumed` | `{ checkpointId, nextPingiEndsAt }` | 전원 확인 완료 → 대시보드 복귀 |
+| `room_ended` | `{ status, reportId }` | 술자리 종료 |
+| `home_checkin_result` | `{ memberId, nickname, arrivedAt, transcript }` | 귀가 체크인 완료 |
+
+## 핑이타임 동기화 흐름
+
+```
+1. 트리거 (수동 or 타이머) → pingi_time_started (전원 녹음 화면 이동)
+2. 각자 녹음 제출 → recording_progress (N/M명 완료)
+3. 전원 제출 완료 → checkpoint_result (전원 결과 화면 이동)
+4. 각자 "확인" 버튼 → result_ack_progress (N/M명 확인)
+5. 전원 확인 완료 → pingi_live_resumed (전원 대시보드 복귀)
+```
+
+- 쿨다운: 핑이타임 간 최소 30초 간격
+- 타이머: 15분 주기 자동 핑이타임 (방장만 트리거)
 
 ## 스크립트
 
 ```bash
-npm run dev          # tsx watch
-npm run build        # tsc
-npm run start        # node dist/server.js
+npm run dev          # tsx watch (개발)
+npm run build        # tsc (빌드)
+npm run start        # node dist/server.js (프로덕션)
 npm run db:push      # prisma db push
 npm run db:migrate   # prisma migrate dev
-npm run db:studio    # prisma studio
+npm run db:studio    # prisma studio (DB GUI)
 ```
 
-## 프론트엔드
+## 연관 서비스
 
-https://github.com/hyojung-mago/pingi-front  
-
-프론트 `.env` 예:
-
-```env
-VITE_API_URL=http://localhost:8000/v1
-VITE_WS_URL=http://localhost:8000
-```
-
-(Socket.io 클라이언트는 베이스 URL에 `path`만 `/v1/ws`로 맞추는 방식이 일반적입니다.)
+| 서비스 | 경로 | 포트 |
+|--------|------|------|
+| 프론트엔드 | `../Pingi-Front` | 5173 |
+| AI 서버 | `../Pingi-AI` | 8001 |
