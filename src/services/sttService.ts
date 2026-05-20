@@ -13,7 +13,7 @@ const AudioEncoding = protos.google.cloud.speech.v1.RecognitionConfig.AudioEncod
 let speechClientInstance: SpeechClient | null | undefined;
 
 function credentialsConfigured(): boolean {
-  const p = process.env.GOOGLE_APPLICATION_CREDENTIALS || config.google.credentials;
+  const p = config.google.credentials;
   if (!p) return false;
   try {
     return fs.existsSync(path.resolve(p));
