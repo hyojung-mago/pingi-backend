@@ -169,10 +169,10 @@ export interface MockHomeCheckin {
 }
 
 export const MOCK_HOME_CHECKINS: MockHomeCheckin[] = [
-  { status: 'moving', transcript: '택시 타고 가는 중이에요~', label: '이동 중', minutesAfterEnd: 0 },
-  { status: 'home', transcript: '무사히 도착했어요! 오늘 너무 재밌었다~', label: '도착 완료', minutesAfterEnd: 25 },
-  { status: 'home', transcript: '집이 가까워서 금방 왔어요ㅋㅋ', label: '도착 완료', minutesAfterEnd: 12 },
-  { status: 'home', transcript: '택시 타고 잘 도착했습니다!', label: '도착 완료', minutesAfterEnd: 35 },
+  { status: 'arrived', transcript: '택시 타고 가는 중이에요~', label: '이동 중', minutesAfterEnd: 0 },
+  { status: 'arrived', transcript: '무사히 도착했어요! 오늘 너무 재밌었다~', label: '도착 완료', minutesAfterEnd: 25 },
+  { status: 'arrived', transcript: '집이 가까워서 금방 왔어요ㅋㅋ', label: '도착 완료', minutesAfterEnd: 12 },
+  { status: 'arrived', transcript: '택시 타고 잘 도착했습니다!', label: '도착 완료', minutesAfterEnd: 35 },
 ];
 
 export const MOCK_MEMBER_COMMENTS = [
