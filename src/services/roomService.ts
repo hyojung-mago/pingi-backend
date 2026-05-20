@@ -9,6 +9,8 @@ import { generateId, generateRoomCode, aggregateDrinks } from '../utils';
 import { AppError } from '../middleware/errorHandler';
 import { config } from '../config';
 import type { RoomResponse, MemberResponse } from '../types';
+import { MOCK_MEMBER_NICKNAMES, MOCK_PARTICIPANTS, MOCK_DRINK_RECORDS } from '../mocks/mockData';
+import { registerMockRoom } from '../mocks/mockState';
 
 const MAX_MEMBERS_PER_ROOM = 10;
 const MAX_CODE_RETRIES = 5;
@@ -107,6 +109,19 @@ export async function createRoom(
   const roomId = generateId('room');
   const hostId = generateId('member');
 
+  const mockMemberIds = [generateId('member'), generateId('member'), generateId('member')];
+  const allMemberIds = [hostId, ...mockMemberIds];
+  const nicknames = [hostNickname, ...MOCK_MEMBER_NICKNAMES.slice(1)];
+
+  const mockMembersData = mockMemberIds.map((id, i) => ({
+    id,
+    nickname: MOCK_MEMBER_NICKNAMES[i + 1]!,
+    isHost: false,
+    breed: MOCK_PARTICIPANTS[i + 1]!.breed,
+    baselineCompleted: true,
+    hungerLevel: MOCK_PARTICIPANTS[i + 1]!.hungerLevel,
+  }));
+
   const room = await prisma.room.create({
     data: {
       id: roomId,
@@ -114,11 +129,10 @@ export async function createRoom(
       location,
       scheduledAt,
       members: {
-        create: {
-          id: hostId,
-          nickname: hostNickname,
-          isHost: true,
-        },
+        create: [
+          { id: hostId, nickname: hostNickname, isHost: true },
+          ...mockMembersData,
+        ],
       },
     },
     include: {
@@ -131,8 +145,58 @@ export async function createRoom(
     },
   });
 
+  // mock 멤버용 더미 Baseline 레코드 생성 (핑이타임 녹음 제출 시 검증 통과용)
+  for (const mockId of mockMemberIds) {
+    await prisma.baseline.create({
+      data: {
+        id: generateId('baseline'),
+        memberId: mockId,
+        audioUrl1: '/mock/baseline1.webm',
+        audioUrl2: '/mock/baseline2.webm',
+        audioUrl3: '/mock/baseline3.webm',
+        sentence1: '테스트 문장 1',
+        sentence2: '테스트 문장 2',
+        sentence3: '테스트 문장 3',
+      },
+    });
+  }
+
+  // mock 멤버용 음주 기록 생성
+  for (let i = 0; i < mockMemberIds.length; i++) {
+    const drinks = MOCK_DRINK_RECORDS[i + 1]!;
+    const drinkEntries: { id: string; memberId: string; type: string; delta: number }[] = [];
+    for (const [type, count] of Object.entries(drinks)) {
+      for (let j = 0; j < count; j++) {
+        drinkEntries.push({ id: generateId('drink'), memberId: mockMemberIds[i]!, type, delta: 1 });
+      }
+    }
+    if (drinkEntries.length > 0) {
+      await prisma.drink.createMany({ data: drinkEntries });
+    }
+  }
+
+  registerMockRoom({
+    roomId,
+    roomCode: code,
+    hostMemberId: hostId,
+    mockMemberIds,
+    allMemberIds,
+    nicknames,
+  });
+
+  // DB에서 다시 읽어서 음주 기록이 반영된 상태로 반환
+  const refreshedRoom = await prisma.room.findUnique({
+    where: { id: roomId },
+    include: {
+      members: {
+        include: { drinks: true, homeCheckin: true },
+        orderBy: { joinedAt: 'asc' },
+      },
+    },
+  });
+
   return {
-    room: formatRoom(room),
+    room: formatRoom(refreshedRoom!),
     hostId,
   };
 }
