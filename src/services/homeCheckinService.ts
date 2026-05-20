@@ -9,6 +9,8 @@ import { generateId } from '../utils';
 import { AppError } from '../middleware/errorHandler';
 import { config } from '../config';
 import { transcribeWithGoogleCloud, isGoogleSttConfigured } from './sttService';
+import { getMockRoomState } from '../mocks/mockState';
+import { MOCK_HOME_CHECKINS } from '../mocks/mockData';
 
 export interface HomeCheckinResult {
   arrivedAt: string;
@@ -98,4 +100,31 @@ function mockTranscriptPhrase(): string {
     '택시 타고 가는 중이에요',
   ];
   return mockPhrases[Math.floor(Math.random() * mockPhrases.length)] ?? mockPhrases[0]!;
+}
+
+/**
+ * 방 종료 시 mock 멤버들의 귀가 체크인을 자동 생성한다.
+ * P2(도착 완료), P4(도착 완료)만 생성하고 P3(응답 없음)은 생성하지 않는다.
+ */
+export async function createMockHomeCheckins(roomId: string): Promise<void> {
+  const state = getMockRoomState(roomId);
+  if (!state) return;
+
+  for (let i = 0; i < state.mockMemberIds.length; i++) {
+    const memberId = state.mockMemberIds[i]!;
+    const checkinData = MOCK_HOME_CHECKINS[i + 1]!;
+
+    if (checkinData.status === 'no_response') continue;
+
+    const existing = await prisma.homeCheckin.findUnique({ where: { memberId } });
+    if (existing) continue;
+
+    await prisma.homeCheckin.create({
+      data: {
+        id: generateId('homeCheckin'),
+        memberId,
+        transcript: checkinData.transcript,
+      },
+    });
+  }
 }

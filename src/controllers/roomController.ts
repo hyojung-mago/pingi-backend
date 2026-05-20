@@ -8,6 +8,7 @@ import type { Request, Response, NextFunction } from 'express';
 import * as roomService from '../services/roomService';
 import * as checkpointService from '../services/checkpointService';
 import * as reportService from '../services/reportService';
+import * as homeCheckinService from '../services/homeCheckinService';
 import { generateToken } from '../middleware/auth';
 import type { CreateRoomRequest, JoinRoomRequest } from '../types';
 import { emitMemberJoined, emitRoomStarted, emitPingiTimeStarted, emitRoomEnded } from '../websocket';
@@ -127,6 +128,7 @@ export async function endRoom(
     
     const room = await roomService.getRoomByCode(code);
     await reportService.generateReport(room.id);
+    await homeCheckinService.createMockHomeCheckins(room.id);
 
     // WebSocket: 방 종료 알림 (모든 멤버가 시상식으로 이동)
     emitRoomEnded(code, result.reportId);
