@@ -9,7 +9,6 @@ import { generateId } from '../utils';
 import { AppError } from '../middleware/errorHandler';
 import { config } from '../config';
 import { transcribeWithGoogleCloud, isGoogleSttConfigured } from './sttService';
-import { getMockRoomState } from '../mocks/mockState';
 import { MOCK_HOME_CHECKINS } from '../mocks/mockData';
 
 export interface HomeCheckinResult {
@@ -103,27 +102,32 @@ function mockTranscriptPhrase(): string {
 }
 
 /**
- * 방 종료 시 mock 멤버들의 귀가 체크인을 자동 생성한다.
- * P2(도착 완료), P4(도착 완료)만 생성하고 P3(응답 없음)은 생성하지 않는다.
+ * 방 종료 시 non-host 멤버들의 귀가 체크인을 자동 생성한다.
+ * 인메모리 상태 대신 DB에서 직접 조회하여 서버 재시작에도 동작한다.
  */
 export async function createMockHomeCheckins(roomId: string): Promise<void> {
-  const state = getMockRoomState(roomId);
-  if (!state) return;
+  const members = await prisma.member.findMany({
+    where: { roomId, isHost: false },
+    include: { homeCheckin: true },
+    orderBy: { joinedAt: 'asc' },
+  });
 
-  for (let i = 0; i < state.mockMemberIds.length; i++) {
-    const memberId = state.mockMemberIds[i]!;
-    const checkinData = MOCK_HOME_CHECKINS[i + 1]!;
+  for (let i = 0; i < members.length; i++) {
+    const member = members[i]!;
+    if (member.homeCheckin) continue;
+
+    const checkinData = MOCK_HOME_CHECKINS[(i % (MOCK_HOME_CHECKINS.length - 1)) + 1]!;
 
     if (checkinData.status === 'no_response') continue;
 
-    const existing = await prisma.homeCheckin.findUnique({ where: { memberId } });
-    if (existing) continue;
+    const arrivedAt = new Date(Date.now() - (checkinData.minutesAfterEnd ?? 0) * 60 * 1000);
 
     await prisma.homeCheckin.create({
       data: {
         id: generateId('homeCheckin'),
-        memberId,
+        memberId: member.id,
         transcript: checkinData.transcript,
+        arrivedAt,
       },
     });
   }

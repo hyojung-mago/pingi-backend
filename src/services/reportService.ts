@@ -8,7 +8,6 @@ import { prisma } from '../lib/prisma';
 import { generateId, aggregateDrinks, toSojuEquivalent } from '../utils';
 import { AppError } from '../middleware/errorHandler';
 import type { FinalReport, Award, Badge, TimelineEntry, ShareCardData, AwardType, CharacterBreed } from '../types';
-import { getMockRoomState } from '../mocks/mockState';
 import { buildMockAwards, buildMockBadges, buildMockTimeline, buildMockStats } from '../mocks/mockData';
 
 function mapReportRow(
@@ -56,46 +55,15 @@ export async function generateReport(roomId: string): Promise<FinalReport> {
     throw AppError.notFound('방을 찾을 수 없어요');
   }
 
-  const mockState = getMockRoomState(roomId);
+  // DB에서 joinedAt 순서로 정렬된 멤버 정보를 사용 (서버 재시작에도 동작)
+  const memberIds = room.members.map((m) => m.id);
+  const nicknames = room.members.map((m) => m.nickname);
+  const breeds = room.members.map((m) => m.breed as CharacterBreed | null);
 
-  let awards: Award[];
-  let badges: Badge[];
-  let timeline: TimelineEntry[];
-  let stats: FinalReport['stats'];
-
-  if (mockState) {
-    const memberIds = mockState.allMemberIds;
-    const nicknames = mockState.nicknames;
-    const breeds = room.members.map((m) => m.breed as CharacterBreed | null);
-    awards = buildMockAwards(memberIds, nicknames, breeds);
-    badges = buildMockBadges(nicknames);
-    timeline = buildMockTimeline(memberIds);
-    stats = buildMockStats(nicknames);
-  } else {
-    const members = room.members.map((m) => ({
-      id: m.id,
-      nickname: m.nickname,
-      breed: m.breed,
-      currentLevel: m.currentLevel,
-      arrivalEta: m.arrivalEta,
-      joinedAt: m.joinedAt,
-      drinks: m.drinks,
-    }));
-    const checkpoints = room.checkpoints.map((cp) => ({
-      id: cp.id,
-      index: cp.index,
-      triggeredAt: cp.triggeredAt,
-      recordings: cp.recordings.map((r) => ({
-        memberId: r.memberId,
-        level: r.level,
-        member: { nickname: r.member.nickname },
-      })),
-    }));
-    awards = calculateAwards(members, checkpoints);
-    badges = calculateBadges(members, checkpoints);
-    timeline = generateTimeline(checkpoints);
-    stats = calculateStats(members, checkpoints);
-  }
+  const awards = buildMockAwards(memberIds, nicknames, breeds);
+  const badges = buildMockBadges(nicknames);
+  const timeline = buildMockTimeline(memberIds);
+  const stats = buildMockStats(nicknames);
 
   const existing = await prisma.report.findUnique({ where: { roomId } });
 

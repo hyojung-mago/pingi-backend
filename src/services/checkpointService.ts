@@ -18,7 +18,6 @@ import {
   emitResultAckProgress,
 } from '../websocket';
 import { MOCK_LEVELS, MOCK_SCORES } from '../mocks/mockData';
-import { getMockRoomState, getMemberIndex } from '../mocks/mockState';
 
 const MIN_PINGI_INTERVAL_MS = 5 * 1000; // MVP: 5초로 단축 (원래 30초)
 const PINGI_ROUND_INTERVAL_MS = 15 * 60 * 1000;
@@ -104,13 +103,14 @@ export async function uploadRecording(
     throw AppError.conflict('이미 녹음을 제출했어요');
   }
 
-  const roundIndex = Math.min(checkpoint.index, MOCK_LEVELS.length - 1);
-  const roomState = getMockRoomState(checkpoint.roomId);
-  const memberIdx = roomState
-    ? getMemberIndex(checkpoint.roomId, memberId)
-    : 0;
+  // joinedAt 순서로 멤버 인덱스를 결정 (DB 기반, 서버 재시작에도 동작)
+  const allMembers = checkpoint.room!.members.sort(
+    (a, b) => a.joinedAt.getTime() - b.joinedAt.getTime()
+  );
+  const memberIdx = allMembers.findIndex((m) => m.id === memberId);
   const safeIdx = memberIdx >= 0 ? memberIdx : 0;
 
+  const roundIndex = Math.min(checkpoint.index, MOCK_LEVELS.length - 1);
   const previousLevel = member.currentLevel;
   const mockLevel = MOCK_LEVELS[roundIndex]?.[safeIdx] ?? 0;
   const mockScore = MOCK_SCORES[roundIndex]?.[safeIdx] ?? 0;
@@ -133,36 +133,34 @@ export async function uploadRecording(
 
   await updateMemberLevel(memberId, mockLevel);
 
-  // mock 멤버 녹음 자동 생성
-  if (roomState) {
-    for (const mockMemberId of roomState.mockMemberIds) {
-      const alreadyRecorded = await prisma.recording.findFirst({
-        where: { checkpointId, memberId: mockMemberId },
-      });
-      if (alreadyRecorded) continue;
+  // non-host 멤버 녹음 자동 생성 (DB 기반)
+  const otherMembers = allMembers.filter((m) => m.id !== memberId);
+  for (const otherMember of otherMembers) {
+    const alreadyRecorded = await prisma.recording.findFirst({
+      where: { checkpointId, memberId: otherMember.id },
+    });
+    if (alreadyRecorded) continue;
 
-      const mIdx = getMemberIndex(checkpoint.roomId, mockMemberId);
-      const mLevel = MOCK_LEVELS[roundIndex]?.[mIdx] ?? 0;
-      const mScore = MOCK_SCORES[roundIndex]?.[mIdx] ?? 0;
-      const mMember = await prisma.member.findUnique({ where: { id: mockMemberId } });
-      const mPrev = mMember?.currentLevel ?? 0;
-      const mDelta = mLevel - mPrev;
+    const mIdx = allMembers.findIndex((m) => m.id === otherMember.id);
+    const mLevel = MOCK_LEVELS[roundIndex]?.[mIdx] ?? 0;
+    const mScore = MOCK_SCORES[roundIndex]?.[mIdx] ?? 0;
+    const mPrev = otherMember.currentLevel;
+    const mDelta = mLevel - mPrev;
 
-      await prisma.recording.create({
-        data: {
-          id: generateId('recording'),
-          checkpointId,
-          memberId: mockMemberId,
-          audioUrl: '/mock/recording.webm',
-          score: mScore,
-          level: mLevel,
-          previousLevel: mPrev,
-          changeRate: mDelta !== 0 ? (mDelta / Math.max(mPrev, 1)) * 100 : 0,
-        },
-      });
+    await prisma.recording.create({
+      data: {
+        id: generateId('recording'),
+        checkpointId,
+        memberId: otherMember.id,
+        audioUrl: '/mock/recording.webm',
+        score: mScore,
+        level: mLevel,
+        previousLevel: mPrev,
+        changeRate: mDelta !== 0 ? (mDelta / Math.max(mPrev, 1)) * 100 : 0,
+      },
+    });
 
-      await updateMemberLevel(mockMemberId, mLevel);
-    }
+    await updateMemberLevel(otherMember.id, mLevel);
   }
 
   const roomCode = checkpoint.room?.code ?? '';
@@ -312,14 +310,11 @@ export async function acknowledgeCheckpointResult(
     acksByCheckpoint.set(checkpointId, new Set());
   }
 
-  // 유저 ack 추가
+  // 유저 ack + non-host 멤버 자동 ack (DB 기반)
   acksByCheckpoint.get(checkpointId)!.add(memberId);
-
-  // mock 멤버들 자동 ack
-  const roomState = getMockRoomState(checkpoint.roomId);
-  if (roomState) {
-    for (const mockId of roomState.mockMemberIds) {
-      acksByCheckpoint.get(checkpointId)!.add(mockId);
+  for (const m of checkpoint.room.members) {
+    if (!m.isHost) {
+      acksByCheckpoint.get(checkpointId)!.add(m.id);
     }
   }
 
