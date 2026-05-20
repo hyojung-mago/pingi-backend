@@ -6,6 +6,8 @@ export interface MockParticipant {
   pattern: string;
   patternLabel: string;
   hungerLevel: number;
+  arrived: boolean;
+  etaPreset: string | null;
 }
 
 export const MOCK_PARTICIPANTS: MockParticipant[] = [
@@ -15,6 +17,8 @@ export const MOCK_PARTICIPANTS: MockParticipant[] = [
     pattern: 'gradual_rise',
     patternLabel: '점진적 상승형',
     hungerLevel: 1,
+    arrived: false,
+    etaPreset: null,
   },
   {
     index: 1,
@@ -22,6 +26,8 @@ export const MOCK_PARTICIPANTS: MockParticipant[] = [
     pattern: 'rapid_drunk',
     patternLabel: '급상승 후 만취 유지형',
     hungerLevel: 3,
+    arrived: true,
+    etaPreset: 'ontime',
   },
   {
     index: 2,
@@ -29,6 +35,8 @@ export const MOCK_PARTICIPANTS: MockParticipant[] = [
     pattern: 'recovery',
     patternLabel: '초반 폭주 후 회복형',
     hungerLevel: 0,
+    arrived: false,
+    etaPreset: 'late10',
   },
   {
     index: 3,
@@ -36,10 +44,12 @@ export const MOCK_PARTICIPANTS: MockParticipant[] = [
     pattern: 'stable',
     patternLabel: '안정형',
     hungerLevel: 2,
+    arrived: true,
+    etaPreset: 'ontime',
   },
 ];
 
-export const MOCK_MEMBER_NICKNAMES = ['', '폭주기관차', '회복의아이콘', '텐션유지왕'];
+export const MOCK_MEMBER_NICKNAMES = ['', '나영', '찬병', '갈로아'];
 
 /**
  * 회차별 취도 레벨 (행: 회차, 열: 참가자 인덱스)

@@ -113,14 +113,19 @@ export async function createRoom(
   const allMemberIds = [hostId, ...mockMemberIds];
   const nicknames = [hostNickname, ...MOCK_MEMBER_NICKNAMES.slice(1)];
 
-  const mockMembersData = mockMemberIds.map((id, i) => ({
-    id,
-    nickname: MOCK_MEMBER_NICKNAMES[i + 1]!,
-    isHost: false,
-    breed: MOCK_PARTICIPANTS[i + 1]!.breed,
-    baselineCompleted: true,
-    hungerLevel: MOCK_PARTICIPANTS[i + 1]!.hungerLevel,
-  }));
+  const mockMembersData = mockMemberIds.map((id, i) => {
+    const p = MOCK_PARTICIPANTS[i + 1]!;
+    return {
+      id,
+      nickname: MOCK_MEMBER_NICKNAMES[i + 1]!,
+      isHost: false,
+      breed: p.breed,
+      baselineCompleted: true,
+      hungerLevel: p.hungerLevel,
+      arrived: p.arrived,
+      etaPreset: p.etaPreset,
+    };
+  });
 
   const room = await prisma.room.create({
     data: {
