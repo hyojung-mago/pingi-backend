@@ -10,9 +10,10 @@
  *   3. 백엔드 ← 결과 응답
  */
 
+import { config } from '../config';
 import { getPingiPromptSentence } from '../constants/sentences';
 
-const AI_API_URL = process.env.AI_API_URL || 'http://localhost:8001';
+const AI_API_URL = config.ai.apiUrl;
 
 export interface AnalysisResult {
   score: number;
@@ -71,7 +72,7 @@ export async function analyzeRecording(
     throw new Error(`AI 분석 실패 (${response.status}): ${error}`);
   }
 
-  const data: AIAnalyzeResponse = await response.json();
+  const data = (await response.json()) as AIAnalyzeResponse;
 
   return {
     score: data.score,
@@ -106,7 +107,7 @@ export async function analyzeBaseline(
     throw new Error(`베이스라인 분석 실패 (${response.status}): ${error}`);
   }
 
-  const data = await response.json();
+  const data = (await response.json()) as { message?: string };
   console.log(`[VoiceAnalysis] 베이스라인 저장 완료: ${data.message}`);
 }
 

@@ -13,6 +13,8 @@ import { errorHandler } from './middleware/errorHandler';
 
 const app = express();
 
+app.set('trust proxy', true);
+
 app.use(cors({
   origin: config.cors.origin,
   credentials: true,

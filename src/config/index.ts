@@ -23,11 +23,17 @@ export const config = {
   
   upload: {
     dir: process.env.UPLOAD_DIR || './uploads',
-    maxFileSize: parseInt(process.env.MAX_FILE_SIZE || '5242880', 10), // 5MB
+    maxFileSize: parseInt(process.env.MAX_FILE_SIZE || '10485760', 10), // 10MB
+  },
+  
+  ai: {
+    apiUrl: process.env.AI_API_URL || 'http://localhost:8001',
   },
   
   cors: {
-    origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+    origin: (process.env.CORS_ORIGIN || 'http://localhost:5173')
+      .split(',')
+      .map((o) => o.trim()),
   },
   
   frontendUrl: process.env.FRONTEND_URL || 'https://pingi.app',
