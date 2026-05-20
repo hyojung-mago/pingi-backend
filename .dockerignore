@@ -1,0 +1,9 @@
+# pingi-backend .dockerignore
+node_modules
+dist
+.env*
+uploads
+.git
+.cursor
+.history
+*.md
