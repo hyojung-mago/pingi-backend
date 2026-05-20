@@ -7,7 +7,6 @@
 import { prisma } from '../lib/prisma';
 import { generateId } from '../utils';
 import { AppError } from '../middleware/errorHandler';
-import { analyzeBaseline } from './voiceAnalysisService';
 import type { BaselineResult } from '../types';
 
 export interface BaselineUploadData {
@@ -67,15 +66,7 @@ export async function uploadBaseline(data: BaselineUploadData): Promise<Baseline
     data: { baselineCompleted: true },
   });
 
-  try {
-    await analyzeBaseline(
-      [data.audioUrls[0], data.audioUrls[1], data.audioUrls[2]],
-      [data.sentences[0], data.sentences[1], data.sentences[2]],
-      data.memberId,
-    );
-  } catch (err) {
-    console.warn('[Baseline] AI 분석 건너뜀 (AI 서버 미실행?):', (err as Error).message);
-  }
+  console.log('[Baseline] MVP 모드: AI 분석 건너뜀');
 
   const updatedRoom = await prisma.room.findUnique({
     where: { id: member.roomId },
