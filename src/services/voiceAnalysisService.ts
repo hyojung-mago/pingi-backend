@@ -69,6 +69,9 @@ export async function analyzeRecording(
 
   if (!response.ok) {
     const error = await response.text();
+    if (response.status === 422) {
+      throw new Error('녹음에서 음성이 감지되지 않았어요. 문장을 소리 내어 읽어주세요.');
+    }
     throw new Error(`AI 분석 실패 (${response.status}): ${error}`);
   }
 
