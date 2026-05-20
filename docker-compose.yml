@@ -10,13 +10,13 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql://postgres:pingi123!!@pingi-postgres:5432/pingi?schema=public
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@pingi-postgres:5432/${POSTGRES_DB}?schema=public
       NODE_ENV: production
-      PORT: "8000"
+      PORT: "${PORT}"
       AI_API_URL: http://pingi-ai:8001
-      MAX_FILE_SIZE: "10485760"
-      CORS_ORIGIN: "https://pingi.mago52.com,http://localhost:5173"
-      FRONTEND_URL: "https://pingi.mago52.com"
+      MAX_FILE_SIZE: "${MAX_FILE_SIZE}"
+      CORS_ORIGIN: "${CORS_ORIGIN}"
+      FRONTEND_URL: "${FRONTEND_URL}"
     volumes:
       - uploads_data:/app/uploads
     networks:
